@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 220 36% 3%;
+  --foreground: 190 40% 96%;
+  --border: 190 45% 16%;
+  --muted: 211 26% 12%;
+  --muted-foreground: 196 18% 64%;
+  --panel: 211 34% 7%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: #020509;
+  color-scheme: dark;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 18% 10%, rgba(53, 217, 255, 0.13), transparent 28%),
+    radial-gradient(circle at 78% 0%, rgba(85, 242, 198, 0.09), transparent 24%),
+    linear-gradient(135deg, #020509 0%, #061019 45%, #020509 100%);
+  color: hsl(var(--foreground));
+}
+
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  content: "";
+  background-image:
+    linear-gradient(rgba(120, 237, 248, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 237, 248, 0.045) 1px, transparent 1px);
+  background-size: 72px 72px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent 78%);
+}
+
+body::after {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.035), transparent 16%),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0 1px, transparent 1px 4px);
+  opacity: 0.42;
+}
+
+::selection {
+  background: rgba(53, 217, 255, 0.32);
+}
+
+@layer components {
+  .glass {
+    border: 1px solid rgba(120, 237, 248, 0.16);
+    background: linear-gradient(180deg, rgba(9, 24, 36, 0.78), rgba(3, 9, 15, 0.74));
+    box-shadow: 0 16px 60px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(22px);
+  }
+
+  .section-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #78edf8;
+  }
+}
