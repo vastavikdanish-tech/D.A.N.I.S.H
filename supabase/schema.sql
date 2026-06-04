@@ -34,7 +34,8 @@ create table if not exists public.memories (
   body text not null,
   shared_with uuid[] not null default '{}',
   tags text[] not null default '{}',
-  embedding vector(1536),
+  importance integer not null default 5 check (importance >= 1 and importance <= 10),
+  embedding vector(3072),
   created_at timestamptz not null default now()
 );
 
@@ -315,3 +316,35 @@ create policy "content_projects_owner" on public.content_projects
 create policy "study_assets_owner" on public.study_assets
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+-- Semantic memory search used by the assistant route. Gemini embedding models
+-- currently return 3072 dimensions, so this must match memories.embedding.
+create or replace function public.match_memories(
+  query_embedding vector(3072),
+  match_threshold float,
+  match_count int,
+  p_user_id uuid
+)
+returns table (
+  id uuid,
+  category text,
+  title text,
+  body text,
+  importance integer,
+  similarity float
+)
+language sql stable
+as $$
+  select
+    memories.id,
+    memories.category,
+    memories.title,
+    memories.body,
+    memories.importance,
+    1 - (memories.embedding <=> query_embedding) as similarity
+  from public.memories
+  where memories.embedding is not null
+    and (memories.user_id = p_user_id or p_user_id = any(memories.shared_with))
+    and 1 - (memories.embedding <=> query_embedding) > match_threshold
+  order by memories.embedding <=> query_embedding
+  limit match_count;
+$$;

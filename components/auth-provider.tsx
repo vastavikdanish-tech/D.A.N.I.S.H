@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Session, User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase";
 
@@ -48,7 +48,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [supabase]);
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string) => {
     try {
       const response = await fetch("/api/auth", {
         method: "POST",
@@ -73,9 +73,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : "Unable to sign in." };
     }
-  };
+  }, [supabase]);
 
-  const signUp = async (email: string, password: string) => {
+  const signUp = useCallback(async (email: string, password: string) => {
     try {
       const response = await fetch("/api/auth", {
         method: "POST",
@@ -100,22 +100,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : "Unable to create account." };
     }
-  };
+  }, [supabase]);
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error("Sign out error:", error.message);
     }
     setSession(null);
     setUser(null);
-  };
+  }, [supabase]);
 
-  const getAccessToken = () => session?.access_token ?? null;
+  const getAccessToken = useCallback(() => session?.access_token ?? null, [session]);
 
   const value = useMemo(
     () => ({ supabase, session, user, isLoading, signIn, signUp, signOut, getAccessToken }),
-    [supabase, session, user, isLoading]
+    [supabase, session, user, isLoading, signIn, signUp, signOut, getAccessToken]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

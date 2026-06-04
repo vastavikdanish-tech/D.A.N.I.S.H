@@ -12,7 +12,7 @@ export async function GET() {
         return NextResponse.json({ ok: true, data });
       }
     }
-  } catch (e) {
+  } catch {
     // fallthrough to mock
   }
 
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: true, queued: data[0] });
       }
     }
-  } catch (e) {
+  } catch {
     // fallback to mock response
   }
 

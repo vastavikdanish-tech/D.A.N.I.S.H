@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useAuth } from "@/components/auth-provider";
 import {
@@ -23,7 +23,6 @@ import {
   Menu,
   Mic,
   Monitor,
-  Moon,
   PanelLeft,
   Play,
   Power,
@@ -61,15 +60,48 @@ const toneClass = {
   danger: "text-danger border-danger/40 bg-danger/10"
 };
 
+type SpeechRecognitionResultLike = {
+  readonly isFinal: boolean;
+  readonly 0: { transcript: string };
+};
+
+type SpeechRecognitionEventLike = Event & {
+  readonly resultIndex: number;
+  readonly results: {
+    readonly length: number;
+    readonly [index: number]: SpeechRecognitionResultLike;
+  };
+};
+
+type SpeechRecognitionLike = EventTarget & {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: ((event: Event) => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+declare global {
+  interface Window {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  }
+}
+
 // client no longer sends a default user id; server derives user from Authorization header
 
 export function CommandCenter() {
   const { getAccessToken, user } = useAuth();
-  const authToken = getAccessToken();
   const [messages, setMessages] = useState<Array<{ role: string; text: string }>>([]);
 
-  async function authFetch(input: RequestInfo, init: RequestInit = {}) {
+  const authFetch = useCallback(async (input: RequestInfo, init: RequestInit = {}) => {
     const headers = new Headers(init.headers ?? {});
+    const authToken = getAccessToken();
 
     if (authToken) {
       headers.set("Authorization", `Bearer ${authToken}`);
@@ -80,10 +112,10 @@ export function CommandCenter() {
     }
 
     return fetch(input, { ...init, headers });
-  }
+  }, [getAccessToken]);
 
-  async function submitAssistant(message: string, mode: string = "assistant") {
-    if (!message) return;
+  const submitAssistant = useCallback(async (message: string, mode: string = "assistant") => {
+    if (!message) return null;
     try {
       // Optimistically add user message
       setMessages((prev) => [...prev, { role: "user", text: message }]);
@@ -95,15 +127,21 @@ export function CommandCenter() {
       });
       const json = await res.json();
       if (json?.ok && json.data) {
-        setMessages((prev) => [...prev, { role: "assistant", text: json.data.content }]);
+        const content = json.data.content || "I processed that, but I could not produce a full response.";
+        setMessages((prev) => [...prev, { role: "assistant", text: content }]);
+        return content;
       } else {
-        setMessages((prev) => [...prev, { role: "assistant", text: "Error: " + (json?.error || "Unable to reach assistant.") }]);
+        const errorMessage = "Error: " + (json?.error || "Unable to reach assistant.");
+        setMessages((prev) => [...prev, { role: "assistant", text: errorMessage }]);
+        return errorMessage;
       }
     } catch (e) {
       console.error(e);
-      setMessages((prev) => [...prev, { role: "assistant", text: "System error: connection failed." }]);
+      const errorMessage = "System error: connection failed.";
+      setMessages((prev) => [...prev, { role: "assistant", text: errorMessage }]);
+      return errorMessage;
     }
-  }
+  }, [authFetch]);
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-[1720px] p-3 sm:p-5">
@@ -125,9 +163,9 @@ export function CommandCenter() {
           </div>
         </section>
         <section className="space-y-4">
-          <MobileVoice authFetch={authFetch} onSendMessage={submitAssistant} />
+          <MobileVoice onSendMessage={submitAssistant} />
           <SystemPanel />
-          <CommandExamples authFetch={authFetch} onSendMessage={submitAssistant} />
+          <CommandExamples onSendMessage={submitAssistant} />
           <Notifications />
           <QuickAccess />
         </section>
@@ -191,7 +229,7 @@ function Sidebar({ authFetch }: { authFetch: (input: RequestInfo, init?: Request
   );
 }
 
-function HeroCommand({ userEmail, onCommand }: { userEmail?: string | null; onCommand: (msg: string) => void }) {
+function HeroCommand({ userEmail, onCommand }: { userEmail?: string | null; onCommand: (msg: string) => Promise<string | null> }) {
   const [input, setInput] = useState("");
   const greetingName = userEmail ? userEmail.split("@")[0] : "Danish";
 
@@ -248,6 +286,7 @@ function HeroCommand({ userEmail, onCommand }: { userEmail?: string | null; onCo
         </p>
         <p className="mt-2 text-sm text-muted-foreground">All Systems Operational.</p>
         <VoiceCore />
+        <VoiceAssistant onSendMessage={onCommand} />
         <p className="mt-8 text-xl text-white">What would you like me to do today?</p>
         <VoiceWave className="mt-5 w-full max-w-xl" />
       </div>
@@ -278,6 +317,177 @@ function VoiceCore() {
       <div className="grid size-24 place-items-center rounded-full border border-cyan-electric/40 bg-cyan-electric/12 shadow-glow">
         <Mic className="size-10 text-cyan-soft" />
       </div>
+    </div>
+  );
+}
+
+function VoiceAssistant({ onSendMessage }: { onSendMessage: (msg: string) => Promise<string | null> }) {
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const listeningRef = useRef(false);
+  const activatedRef = useRef(false);
+  const speakingRef = useRef(false);
+  const cooldownUntilRef = useRef(0);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [supported, setSupported] = useState(true);
+  const [enabled, setEnabled] = useState(false);
+  const [activated, setActivated] = useState(false);
+  const [status, setStatus] = useState("Wake word off");
+  const [lastTranscript, setLastTranscript] = useState("");
+
+  const speak = useCallback((text: string) => {
+    if (!("speechSynthesis" in window)) return Promise.resolve();
+
+    return new Promise<void>((resolve) => {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 0.96;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+      speakingRef.current = true;
+      utterance.onend = () => {
+        speakingRef.current = false;
+        resolve();
+      };
+      utterance.onerror = () => {
+        speakingRef.current = false;
+        resolve();
+      };
+      window.speechSynthesis.speak(utterance);
+    });
+  }, []);
+
+  const restartListening = useCallback(() => {
+    if (!enabled || listeningRef.current || speakingRef.current) return;
+    if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+    restartTimerRef.current = setTimeout(() => {
+      try {
+        recognitionRef.current?.start();
+        listeningRef.current = true;
+        setStatus(activatedRef.current ? "Listening for your command..." : "Listening for \"Hello Danish\"...");
+      } catch {
+        listeningRef.current = false;
+      }
+    }, 250);
+  }, [enabled]);
+
+  const processCommand = useCallback(async (command: string) => {
+    const cleaned = command.trim();
+    if (!cleaned) return;
+
+    setStatus("Thinking...");
+    const response = await onSendMessage(cleaned);
+    if (response) {
+      setStatus("Speaking...");
+      await speak(response);
+    }
+    setStatus("Listening for your command...");
+    restartListening();
+  }, [onSendMessage, restartListening, speak]);
+
+  const handleTranscript = useCallback(async (transcript: string) => {
+    const cleaned = transcript.trim();
+    const normalized = cleaned.toLowerCase();
+    setLastTranscript(cleaned);
+
+    if (!activatedRef.current) {
+      if (!normalized.includes("hello danish") || Date.now() < cooldownUntilRef.current) return;
+
+      cooldownUntilRef.current = Date.now() + 3500;
+      activatedRef.current = true;
+      setActivated(true);
+      setStatus("Activated");
+      recognitionRef.current?.stop();
+      listeningRef.current = false;
+      await speak("Hello Danish, how can I help you today?");
+
+      const commandAfterWake = cleaned.replace(/hello danish/i, "").trim();
+      if (commandAfterWake) {
+        await processCommand(commandAfterWake);
+      } else {
+        setStatus("Listening for your command...");
+        restartListening();
+      }
+      return;
+    }
+
+    recognitionRef.current?.stop();
+    listeningRef.current = false;
+    await processCommand(cleaned);
+  }, [processCommand, restartListening, speak]);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) {
+      setSupported(false);
+      setStatus("Voice recognition is not supported in this browser");
+      return;
+    }
+
+    const recognition = new Recognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = "en-IN";
+    recognition.onresult = (event) => {
+      let finalText = "";
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const result = event.results[index];
+        if (result.isFinal) finalText += result[0].transcript;
+      }
+      if (finalText) void handleTranscript(finalText);
+    };
+    recognition.onerror = () => {
+      listeningRef.current = false;
+      setStatus("Mic paused. Restarting...");
+    };
+    recognition.onend = () => {
+      listeningRef.current = false;
+      restartListening();
+    };
+
+    recognitionRef.current = recognition;
+    restartListening();
+
+    return () => {
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      recognition.onend = null;
+      recognition.onresult = null;
+      recognition.onerror = null;
+      recognition.stop();
+      recognitionRef.current = null;
+      listeningRef.current = false;
+    };
+  }, [enabled, handleTranscript, restartListening]);
+
+  const toggleListening = async () => {
+    if (enabled) {
+      setEnabled(false);
+      setActivated(false);
+      activatedRef.current = false;
+      setStatus("Wake word off");
+      window.speechSynthesis?.cancel();
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    setSupported(true);
+    setEnabled(true);
+    setStatus("Listening for \"Hello Danish\"...");
+  };
+
+  return (
+    <div className="mt-5 w-full max-w-xl rounded-lg border border-cyan-electric/14 bg-black/28 p-3 text-left">
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" size="sm" variant={enabled ? "secondary" : "primary"} onClick={toggleListening}>
+          <Mic className="size-4" />
+          {enabled ? "Stop Voice" : "Start Voice"}
+        </Button>
+        <span className={cn("text-xs", activated ? "text-mint" : enabled ? "text-cyan-soft" : "text-muted-foreground")}>{status}</span>
+      </div>
+      <p className="mt-2 min-h-5 truncate text-xs text-muted-foreground">
+        {supported ? lastTranscript || "Say \"Hello Danish\" to activate hands-free mode." : "Use Chrome or Edge for speech recognition."}
+      </p>
     </div>
   );
 }
@@ -452,7 +662,7 @@ function AutomationPanel({ authFetch }: { authFetch: (input: RequestInfo, init?:
   );
 }
 
-function AssistantPanel({ authFetch, messages, onSendMessage }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response>; messages: Array<{role: string; text: string}>; onSendMessage: (msg: string) => void }) {
+function AssistantPanel({ messages, onSendMessage }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response>; messages: Array<{role: string; text: string}>; onSendMessage: (msg: string) => Promise<string | null> }) {
   const [input, setInput] = useState("");
 
   const handleSend = () => {
@@ -507,7 +717,7 @@ function MemoryPanel({ authFetch }: { authFetch: (input: RequestInfo, init?: Req
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function loadMemories(category: string) {
+  const loadMemories = useCallback(async (category: string) => {
     setLoading(true);
     setError(null);
     try {
@@ -518,16 +728,16 @@ function MemoryPanel({ authFetch }: { authFetch: (input: RequestInfo, init?: Req
       } else {
         setError(json?.error || "Failed to load memories.");
       }
-    } catch (e) {
+    } catch {
       setError("Unable to load memories.");
     } finally {
       setLoading(false);
     }
-  }
+  }, [authFetch]);
 
   useEffect(() => {
     loadMemories(selectedCategory);
-  }, [selectedCategory]);
+  }, [loadMemories, selectedCategory]);
 
   async function createMemory() {
     if (!newTitle || !newBody) {
@@ -552,7 +762,7 @@ function MemoryPanel({ authFetch }: { authFetch: (input: RequestInfo, init?: Req
       } else {
         setError(json?.error || "Failed to save memory.");
       }
-    } catch (e) {
+    } catch {
       setError("Unable to save memory.");
     }
   }
@@ -672,7 +882,7 @@ function StudyAndCareer() {
   );
 }
 
-function MobileVoice({ authFetch, onSendMessage }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response>; onSendMessage: (msg: string) => void }) {
+function MobileVoice({ onSendMessage }: { onSendMessage: (msg: string) => Promise<string | null> }) {
   return (
     <Card className="overflow-hidden p-5">
       <div className="mb-4 flex items-center justify-between">
@@ -766,7 +976,7 @@ function SystemPanel() {
   );
 }
 
-function CommandExamples({ authFetch, onSendMessage }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response>; onSendMessage: (msg: string) => void }) {
+function CommandExamples({ onSendMessage }: { onSendMessage: (msg: string) => Promise<string | null> }) {
   return (
     <Card>
       <CardHeader>

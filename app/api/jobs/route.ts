@@ -15,7 +15,7 @@ export async function GET() {
       // No dedicated jobs table in schema; return mock jobs for now
       return NextResponse.json({ ok: true, data: mockJobs });
     }
-  } catch (e) {
+  } catch {
     // fallback
   }
 
@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       const { data, error } = await supabase.from("memories").insert(mem).select();
       if (!error && data) return NextResponse.json({ ok: true, data: data[0] }, { status: 201 });
     }
-  } catch (e) {
+  } catch {
     // fallback to echo
   }
 

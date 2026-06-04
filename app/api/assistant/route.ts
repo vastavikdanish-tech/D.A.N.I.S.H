@@ -1,20 +1,48 @@
 import { NextResponse } from "next/server";
 import { assistantRequestSchema, generateAssistantResponse, generateEmbedding } from "@/lib/ai";
-import { createClient } from "@/lib/supabase.server";
+import { getSupabaseAdminClient } from "@/lib/supabase.server";
+import { getUserFromRequest } from "@/lib/auth";
+
+type MemoryContext = {
+  id?: string;
+  category: string;
+  title: string;
+  body: string;
+  importance?: number;
+};
+
+type MemoryRow = MemoryContext & {
+  shared_with?: string[];
+};
+
+function asString(value: unknown, fallback = "") {
+  return typeof value === "string" ? value : fallback;
+}
+
+function asNumber(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function asStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
 
 export async function POST(request: Request) {
   try {
     const json = await request.json();
     const payload = assistantRequestSchema.parse(json);
     console.log("[ASSISTANT_ROUTE] Received message:", payload.message);
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const supabase = getSupabaseAdminClient();
+    const user = await getUserFromRequest(request);
     
-    if (!user) {
+    if (!user?.id) {
       return NextResponse.json({ ok: false, error: "Unauthenticated" }, { status: 401 });
     }
+    if (!supabase) {
+      return NextResponse.json({ ok: false, error: "Supabase admin client not configured" }, { status: 500 });
+    }
 
-    let memories: Array<{ id?: string; category: string; title: string; body: string; importance?: number }> = [];
+    let memories: MemoryContext[] = [];
 
     try {
       const { data } = await supabase
@@ -25,7 +53,7 @@ export async function POST(request: Request) {
         .order("created_at", { ascending: false })
         .limit(15);
 
-      if (data) memories = data.map((d: any) => ({ 
+      if (data) memories = (data as MemoryRow[]).map((d) => ({ 
         id: d.id, 
         category: d.category, 
         title: d.title, 
@@ -49,10 +77,17 @@ export async function POST(request: Request) {
         
         try {
           if (name === "create_memory") {
-            const embedding = await generateEmbedding(`${args.title} ${args.body}`);
+            const title = asString(args.title, "Memory");
+            const body = asString(args.body);
+            const category = asString(args.category, "conversation");
+            const embedding = await generateEmbedding(`${title} ${body}`);
             const { data, error } = await supabase.from("memories").insert({
               user_id: user.id,
-              ...args,
+              title,
+              body,
+              category,
+              importance: asNumber(args.importance, 5),
+              tags: asStringArray(args.tags),
               embedding,
               created_at: new Date().toISOString()
             }).select().single();
@@ -61,20 +96,23 @@ export async function POST(request: Request) {
               result: error ? { error: error.message } : { status: "success", data } 
             });
           } else if (name === "update_memory") {
-            const updatePayload: any = { ...args };
-            delete updatePayload.id;
+            const memoryId = asString(args.id);
+            const updatePayload: Record<string, unknown> = {};
+            if (typeof args.title === "string") updatePayload.title = args.title;
+            if (typeof args.body === "string") updatePayload.body = args.body;
+            if (typeof args.importance === "number") updatePayload.importance = args.importance;
             
             if (updatePayload.title || updatePayload.body) {
-              const current = memories.find(m => m.id === args.id);
-              const title = updatePayload.title || current?.title || "";
-              const body = updatePayload.body || current?.body || "";
+              const current = memories.find(m => m.id === memoryId);
+              const title = asString(updatePayload.title, current?.title || "");
+              const body = asString(updatePayload.body, current?.body || "");
               updatePayload.embedding = await generateEmbedding(`${title} ${body}`);
             }
 
             const { data, error } = await supabase
               .from("memories")
               .update(updatePayload)
-              .eq("id", args.id)
+              .eq("id", memoryId)
               .eq("user_id", user.id)
               .select().single();
             
@@ -85,29 +123,32 @@ export async function POST(request: Request) {
           } else if (name === "add_reminder") {
             const { error } = await supabase.from("reminders").insert({
               user_id: user.id,
-              ...args,
+              title: asString(args.title, "Reminder"),
+              body: asString(args.body) || null,
+              remind_at: asString(args.remind_at) || null,
               created_at: new Date().toISOString()
             });
             toolResults.push({ 
               call, 
-              result: error ? { error: error.message } : { status: "success", message: `Reminder added: ${args.title}` } 
+              result: error ? { error: error.message } : { status: "success", message: `Reminder added: ${asString(args.title, "Reminder")}` } 
             });
           } else if (name === "control_device") {
             const { error } = await supabase.from("device_commands").insert({
               user_id: user.id,
-              device_id: args.deviceId,
-              command: args.action,
-              payload: args.payload ?? {},
+              device_id: asString(args.deviceId),
+              command: asString(args.action, "open_app"),
+              payload: typeof args.payload === "object" && args.payload !== null ? args.payload : {},
               status: "queued",
               created_at: new Date().toISOString()
             });
             toolResults.push({ 
               call, 
-              result: error ? { error: error.message } : { status: "success", message: `Command ${args.action} sent to device` } 
+              result: error ? { error: error.message } : { status: "success", message: `Command ${asString(args.action, "open_app")} sent to device` } 
             });
           } else if (name === "search_memories") {
-            console.log("[ASSISTANT_ROUTE] Performing semantic search for:", args.query);
-            const queryEmbedding = await generateEmbedding(args.query);
+            const searchQuery = asString(args.query);
+            console.log("[ASSISTANT_ROUTE] Performing semantic search for:", searchQuery);
+            const queryEmbedding = await generateEmbedding(searchQuery);
             let searchResult;
 
             if (queryEmbedding) {
@@ -132,11 +173,11 @@ export async function POST(request: Request) {
               let query = supabase
                 .from("memories")
                 .select("id,category,title,body,importance")
-                .or(`title.ilike.%${args.query}%,body.ilike.%${args.query}%`)
+                .or(`title.ilike.%${searchQuery}%,body.ilike.%${searchQuery}%`)
                 .eq("user_id", user.id)
                 .limit(5);
               
-              if (args.category) query = query.eq("category", args.category);
+              if (typeof args.category === "string") query = query.eq("category", args.category);
               const { data } = await query;
               searchResult = data || [];
               console.log("[ASSISTANT_ROUTE] Keyword search results:", searchResult.length);
@@ -160,10 +201,15 @@ export async function POST(request: Request) {
       }
     }
 
-    console.log("[ASSISTANT_ROUTE] Final response content:", response.content?.slice(0, 100) + "...");
+    const finalContent = response.content || "I processed that, but I could not produce a full response. Please try again.";
+    console.log("[ASSISTANT_ROUTE] Final response content:", finalContent.slice(0, 100) + "...");
 
     // Persist conversation history
     try {
+      const [userEmbedding, assistantEmbedding] = await Promise.all([
+        generateEmbedding(payload.message),
+        generateEmbedding(finalContent)
+      ]);
       await supabase.from("memories").insert([
         {
           user_id: user.id,
@@ -172,15 +218,17 @@ export async function POST(request: Request) {
           body: payload.message,
           tags: [],
           importance: 10,
+          embedding: userEmbedding,
           created_at: new Date().toISOString()
         },
         {
           user_id: user.id,
           category: "conversation",
-          title: `Assistant: ${response.content.slice(0, 100)}`,
-          body: response.content,
+          title: `Assistant: ${finalContent.slice(0, 100)}`,
+          body: finalContent,
           tags: [],
           importance: 10,
+          embedding: assistantEmbedding,
           created_at: new Date().toISOString()
         }
       ]);
@@ -194,7 +242,8 @@ export async function POST(request: Request) {
         id: crypto.randomUUID(),
         role: "assistant",
         createdAt: new Date().toISOString(),
-        ...response
+        ...response,
+        content: finalContent
       }
     });
   } catch (error) {

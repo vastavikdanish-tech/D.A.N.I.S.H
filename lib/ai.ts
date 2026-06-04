@@ -7,8 +7,24 @@ export const assistantRequestSchema = z.object({
 
 export type AssistantMode = z.infer<typeof assistantRequestSchema>["mode"];
 
+type GeminiFunctionCall = {
+  functionCall: {
+    name: string;
+    args: Record<string, unknown>;
+  };
+};
+
+export type AssistantToolResult = {
+  call: GeminiFunctionCall;
+  result: unknown;
+};
+
+type AssistantResponse =
+  | { provider: "gemini"; content: string; toolCalls?: never }
+  | { provider: "gemini"; toolCalls: GeminiFunctionCall[]; content?: never };
+
 const systemPrompts: Record<AssistantMode, string> = {
-  assistant: "You are D.A.N.I.S.H, a proactive AI operating system. ALWAYS extract and save new facts about the user automatically using tools. Check for existing memories to update instead of duplicating. Assign importance (1-10) to every memory. Keep answers concise.",
+  assistant: "You are D.A.N.I.S.H, a warm, emotionally aware conversational AI operating system. Speak naturally, vary short and detailed answers based on the moment, and remember useful facts about the user. Use tools proactively for durable facts, preferences, goals, and ongoing context. Check existing memories before duplicating. Assign importance (1-10) to every memory. Keep most replies concise unless the user needs depth.",
   study: "You are Study OS inside D.A.N.I.S.H. Teach clearly and automatically save key study progress or facts learned about the user.",
   career: "You are Career OS inside D.A.N.I.S.H. Help with jobs and automatically remember the user's skills and career goals.",
   content: "You are Content Factory inside D.A.N.I.S.H. Produce assets and remember the user's content style and brand voice.",
@@ -60,8 +76,8 @@ export async function generateAssistantResponse(
   message: string,
   mode: AssistantMode,
   memories: Array<{ category: string; title: string; body: string }> = [],
-  toolResults?: Array<{ call: any; result: any }>
-) {
+  toolResults?: AssistantToolResult[]
+): Promise<AssistantResponse> {
   const geminiKey = process.env.GEMINI_API_KEY;
   const geminiUrl = process.env.GEMINI_API_URL;
   const envModel = process.env.GEMINI_MODEL;
@@ -83,35 +99,22 @@ export async function generateAssistantResponse(
         .join("\n")}\n\n`
     : "";
 
-  const promptText = `${systemPrompts[mode]}\n\n${memoryContext}${message}`;
+  const toolContext = toolResults?.length
+    ? `Tool results:\n${toolResults
+        .map((toolResult) => `- ${toolResult.call.functionCall.name}: ${JSON.stringify(toolResult.result)}`)
+        .join("\n")}\n\nNow answer the user naturally. Do not mention internal tool mechanics unless it helps the user.\n\n`
+    : "";
+
+  const promptText = `${systemPrompts[mode]}\n\n${memoryContext}${toolContext}User message: ${message}`;
   console.log("[AI_LIB] Final promptText length:", promptText.length);
   // console.log("[AI_LIB] promptText:", promptText); // Optional: can be very long
   
-  const contents: any[] = [
+  const contents = [
     {
       role: "user",
       parts: [{ text: promptText }]
     }
   ];
-
-  if (toolResults && toolResults.length > 0) {
-    console.log("[AI_LIB] Including toolResults in contents:", toolResults.length);
-    // Add the model's previous tool calls
-    contents.push({
-      role: "model",
-      parts: toolResults.map(tr => tr.call)
-    });
-    // Add the tool responses
-    contents.push({
-      role: "function",
-      parts: toolResults.map(tr => ({
-        functionResponse: {
-          name: tr.call.functionCall.name,
-          response: { result: tr.result }
-        }
-      }))
-    });
-  }
 
   console.log("[AI_LIB] Contents array:", JSON.stringify(contents, null, 2));
 
@@ -199,10 +202,10 @@ export async function generateAssistantResponse(
 
   const body = {
     contents,
-    tools,
+    ...(toolResults?.length ? {} : { tools }),
     generationConfig: {
       maxOutputTokens: 1000,
-      temperature: toolResults ? 0.7 : 0.2 // higher temp for final answer, lower for tool calls
+      temperature: toolResults ? 0.7 : 0.25
     },
     safetySettings: [
       { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
@@ -219,7 +222,7 @@ export async function generateAssistantResponse(
     return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   }
 
-  async function callGemini(url: string) {
+  async function callGemini(url: string): Promise<AssistantResponse> {
     const urlWithKey = new URL(url);
     urlWithKey.searchParams.set("key", key);
 
@@ -234,14 +237,25 @@ export async function generateAssistantResponse(
       throw new Error(`Gemini API returned ${res.status}: ${responseText}`);
     }
 
-    const json = JSON.parse(responseText);
+    const json: {
+      candidates?: Array<{
+        content?: {
+          parts?: Array<{ text?: string; functionCall?: GeminiFunctionCall["functionCall"] }>;
+        };
+      }>;
+    } = JSON.parse(responseText);
     console.log("[AI_LIB] Gemini candidate content parts length:", json?.candidates?.[0]?.content?.parts?.length);
     const candidate = json?.candidates?.[0];
     const part = candidate?.content?.parts?.[0];
 
-    if (part?.functionCall) {
+    if (part?.functionCall && !toolResults?.length) {
       console.log("[AI_LIB] Gemini returned functionCall:", part.functionCall.name);
-      return { provider: "gemini", toolCalls: candidate.content.parts.filter((p: any) => p.functionCall) };
+      return {
+        provider: "gemini",
+        toolCalls: candidate?.content?.parts
+          ?.filter((p): p is { functionCall: GeminiFunctionCall["functionCall"] } => Boolean(p.functionCall))
+          .map((p) => ({ functionCall: p.functionCall })) ?? []
+      };
     }
 
     const text = part?.text;

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase.server";
+import { getSupabaseAdminClient } from "@/lib/supabase.server";
+import { getUserFromRequest } from "@/lib/auth";
+import { generateEmbedding } from "@/lib/ai";
 
 const memoryCreateSchema = z.object({
   title: z.string().min(1),
@@ -12,11 +14,14 @@ const memoryCreateSchema = z.object({
 });
 
 export async function GET(request: Request) {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const supabase = getSupabaseAdminClient();
+  const user = await getUserFromRequest(request);
   
-  if (authError || !user) {
+  if (!user?.id) {
     return NextResponse.json({ ok: false, error: "Missing or unauthenticated user." }, { status: 401 });
+  }
+  if (!supabase) {
+    return NextResponse.json({ ok: false, error: "Supabase admin client not configured." }, { status: 500 });
   }
 
   const { searchParams } = new URL(request.url);
@@ -44,15 +49,19 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const supabase = getSupabaseAdminClient();
+  const user = await getUserFromRequest(request);
   
-  if (authError || !user) {
+  if (!user?.id) {
     return NextResponse.json({ ok: false, error: "Missing or unauthenticated user." }, { status: 401 });
+  }
+  if (!supabase) {
+    return NextResponse.json({ ok: false, error: "Supabase admin client not configured." }, { status: 500 });
   }
 
   const json = await request.json();
   const payload = memoryCreateSchema.parse(json);
+  const embedding = await generateEmbedding(`${payload.title} ${payload.body}`);
 
   // Validate shared_with contains only UUIDs if provided
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -68,6 +77,7 @@ export async function POST(request: Request) {
     importance: payload.importance ?? 5,
     tags: payload.tags ?? [],
     shared_with: payload.shared_with ?? [],
+    embedding,
     created_at: new Date().toISOString()
   }).select().single();
 

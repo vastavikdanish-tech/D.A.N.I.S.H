@@ -10,7 +10,7 @@ export async function GET() {
       const { data, error } = await supabase.from("automations").select("*").limit(100);
       if (!error && data) return NextResponse.json({ ok: true, data });
     }
-  } catch (e) {
+  } catch {
     // fallback
   }
 
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       const { data, error } = await supabase.from("automations").insert(payload).select();
       if (!error && data) return NextResponse.json({ ok: true, data: data[0] }, { status: 201 });
     }
-  } catch (e) {
+  } catch {
     // fallback
   }
 
