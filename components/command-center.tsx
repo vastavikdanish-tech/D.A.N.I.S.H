@@ -40,6 +40,7 @@ import { automations, commandExamples, devices, knowledgeBlocks, modules, quickA
 import { formatPercent, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { ProfileSettings } from "@/components/profile-settings";
 
 const menu = [
   { label: "Dashboard", icon: LayoutDashboard, href: "#dashboard" },
@@ -306,6 +307,7 @@ export function CommandCenter() {
         </section>
         <section className="space-y-4">
           <ProfileSummary profile={profile} />
+          <ProfileSettings />
           <MobileVoice onSendMessage={submitAssistant} />
           <SystemPanel authFetch={authFetch} />
           <CommandExamples onSendMessage={submitAssistant} />
