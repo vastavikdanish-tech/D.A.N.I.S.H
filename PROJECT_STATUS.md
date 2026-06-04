@@ -151,7 +151,6 @@ The schema also enables RLS and defines owner/shared access policies for the abo
 
 ## Missing Features
 
-- Onboarding flow after login.
 - Avatar upload/update UI (avatar_url field exists, upload not implemented).
 - User preferences UI and persistence beyond basic `profiles.display_name`, `timezone`, `bio`.
 - Dynamic dashboard suggestions from memories, tasks, study goals, activity history, or device usage.
@@ -197,6 +196,7 @@ Hardcoded or mock-backed areas found:
 - Edit Profile page → implemented (Batch 2)
 - Dynamic greeting based on profile name → implemented (Batch 1)
 - User preferences UI for display_name, bio, timezone → implemented (Batch 2)
+- Onboarding flow after login → implemented (Batch 3)
 
 ## API Coverage
 
@@ -339,6 +339,16 @@ Based on the requested strategy, the safest next batch should focus on the exist
 - Integrated into CommandCenter right sidebar
 - Calls `/api/profile` PATCH on save
 
+#### Batch 3: Onboarding Flow & Dynamic Greetings ✅
+- Created `components/onboarding.tsx` - 5-step onboarding (Welcome, Name, Timezone, Voice, Complete)
+- Framer Motion entrance animation
+- Progress indicator with visual step tracking
+- Configurable wake word (default: "Hello Danish")
+- Saves profile on completion via `/api/profile` PATCH
+- Auto-shows for users without display_name
+- HeroCommand/ProfileSummary use dynamic `profile.display_name`
+- Removed hardcoded "Danish" fallback from greetings
+
 ---
 
 ## Verification Performed
@@ -351,12 +361,14 @@ Based on the requested strategy, the safest next batch should focus on the exist
 - Scanned for hardcoded names, mock data, placeholder usage, PWA/APK indicators, and mobile readiness clues.
 - Phase 3 Batch 1: TypeScript, ESLint, Build, API GET/PATCH, Dashboard rendering - ALL PASS
 - Phase 3 Batch 2: TypeScript, ESLint, Build, API GET/PATCH, Dashboard rendering - ALL PASS
+- Phase 3 Batch 3: TypeScript, ESLint, Build, API GET/PATCH, Dashboard rendering, Auth, Memories, Reminders - ALL PASS
 
 ## Files Changed In Phase 3
 
 - `app/api/profile/route.ts` - Profile API endpoints
-- `components/command-center.tsx` - Dynamic greeting, profile integration
+- `components/command-center.tsx` - Dynamic greeting, profile integration, onboarding
 - `components/profile-settings.tsx` - Profile settings UI
+- `components/onboarding.tsx` - Onboarding flow component
 
 ## Rollback Instructions
 
@@ -370,7 +382,12 @@ git restore -- app/api/profile/route.ts components/command-center.tsx
 git restore -- components/profile-settings.tsx components/command-center.tsx
 ```
 
+### Phase 3 Batch 3
+```bash
+git restore -- components/onboarding.tsx components/command-center.tsx
+```
+
 ### Full Phase 3
 ```bash
-git checkout HEAD -- app/api/profile/route.ts components/command-center.tsx components/profile-settings.tsx
+git checkout HEAD -- app/api/profile/route.ts components/command-center.tsx components/profile-settings.tsx components/onboarding.tsx
 ```
