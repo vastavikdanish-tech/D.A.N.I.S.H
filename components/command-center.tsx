@@ -42,15 +42,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 
 const menu = [
-  { label: "Dashboard", icon: LayoutDashboard },
-  { label: "Assistant", icon: Bot },
-  { label: "Remote Control", icon: Laptop },
-  { label: "Automation", icon: Workflow },
-  { label: "Files & Data", icon: FolderOpen },
-  { label: "AI Tools", icon: Sparkles },
-  { label: "Calendar", icon: CalendarDays },
-  { label: "System Monitor", icon: Gauge },
-  { label: "Settings", icon: Settings }
+  { label: "Dashboard", icon: LayoutDashboard, href: "#dashboard" },
+  { label: "Assistant", icon: Bot, href: "#assistant" },
+  { label: "Remote Control", icon: Laptop, href: "#remote" },
+  { label: "Automation", icon: Workflow, href: "#automation" },
+  { label: "Files & Data", icon: FolderOpen, href: "#quick-access" },
+  { label: "AI Tools", icon: Sparkles, href: "#content" },
+  { label: "Calendar", icon: CalendarDays, href: "#reminders" },
+  { label: "System Monitor", icon: Gauge, href: "#system" },
+  { label: "Settings", icon: Settings, href: "#profile" }
 ];
 
 const toneClass = {
@@ -202,9 +202,21 @@ function selectSpeechVoice(text: string, voices = getSpeechVoices()) {
 
 // client no longer sends a default user id; server derives user from Authorization header
 
+type UserProfile = {
+  id: string;
+  display_name: string;
+  avatar_url: string | null;
+  timezone: string;
+  bio: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export function CommandCenter() {
   const { getAccessToken, user } = useAuth();
   const [messages, setMessages] = useState<Array<{ role: string; text: string }>>([]);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
 
   const authFetch = useCallback(async (input: RequestInfo, init: RequestInit = {}) => {
     const headers = new Headers(init.headers ?? {});
@@ -220,6 +232,27 @@ export function CommandCenter() {
 
     return fetch(input, { ...init, headers });
   }, [getAccessToken]);
+
+  useEffect(() => {
+    async function loadProfile() {
+      if (!user?.email) {
+        setProfileLoading(false);
+        return;
+      }
+      try {
+        const res = await authFetch("/api/profile");
+        const json = await res.json();
+        if (json?.ok && json.data) {
+          setProfile(json.data);
+        }
+      } catch (e) {
+        console.error("Failed to load profile:", e);
+      } finally {
+        setProfileLoading(false);
+      }
+    }
+    loadProfile();
+  }, [authFetch, user?.email]);
 
   const submitAssistant = useCallback(async (message: string, mode: string = "assistant") => {
     if (!message) return null;
@@ -251,11 +284,12 @@ export function CommandCenter() {
   }, [authFetch]);
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-[1720px] p-3 sm:p-5">
+    <main id="dashboard" className="mx-auto min-h-screen w-full max-w-[1720px] p-3 sm:p-5">
       <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)_380px]">
         <Sidebar authFetch={authFetch} />
         <section className="space-y-4">
-          <HeroCommand userEmail={user?.email} onCommand={submitAssistant} />
+          <HeroCommand profile={profile} onCommand={submitAssistant} />
+          <MobileSectionNav />
           <ModuleGrid />
           <div className="grid gap-4 lg:grid-cols-[1.08fr_0.92fr]">
             <RemoteControl authFetch={authFetch} />
@@ -265,13 +299,15 @@ export function CommandCenter() {
             <div className="space-y-4">
               <AssistantPanel authFetch={authFetch} messages={messages} onSendMessage={submitAssistant} />
               <MemoryPanel authFetch={authFetch} />
+              <RemindersPanel authFetch={authFetch} />
             </div>
             <StudyAndCareer />
           </div>
         </section>
         <section className="space-y-4">
+          <ProfileSummary profile={profile} />
           <MobileVoice onSendMessage={submitAssistant} />
-          <SystemPanel />
+          <SystemPanel authFetch={authFetch} />
           <CommandExamples onSendMessage={submitAssistant} />
           <Notifications />
           <QuickAccess />
@@ -311,8 +347,9 @@ function Sidebar({ authFetch }: { authFetch: (input: RequestInfo, init?: Request
       <p className="mb-3 text-xs font-semibold uppercase text-cyan-soft">Main Menu</p>
       <nav className="space-y-1">
         {menu.map((item, index) => (
-          <button
+          <a
             key={item.label}
+            href={item.href}
             className={cn(
               "flex h-10 w-full items-center gap-3 rounded-md px-3 text-sm text-muted-foreground transition hover:bg-white/[0.06] hover:text-white",
               index === 0 && "bg-cyan-electric/12 text-white"
@@ -320,7 +357,7 @@ function Sidebar({ authFetch }: { authFetch: (input: RequestInfo, init?: Request
           >
             <item.icon className="size-4 text-cyan-soft" />
             {item.label}
-          </button>
+          </a>
         ))}
       </nav>
       <p className="mb-3 mt-8 text-xs font-semibold uppercase text-cyan-soft">Quick Actions</p>
@@ -336,9 +373,52 @@ function Sidebar({ authFetch }: { authFetch: (input: RequestInfo, init?: Request
   );
 }
 
-function HeroCommand({ userEmail, onCommand }: { userEmail?: string | null; onCommand: (msg: string) => Promise<string | null> }) {
+function MobileSectionNav() {
+  return (
+    <nav className="glass grid grid-cols-3 gap-2 rounded-lg p-3 sm:grid-cols-5 xl:hidden">
+      {menu.slice(0, 10).map((item) => (
+        <a
+          key={item.label}
+          href={item.href}
+          className="flex min-h-16 flex-col items-center justify-center gap-1 rounded-md border border-cyan-electric/10 bg-black/18 px-2 py-2 text-center text-[11px] text-muted-foreground transition hover:border-cyan-electric/30 hover:text-white"
+        >
+          <item.icon className="size-4 text-cyan-soft" />
+          <span className="leading-tight">{item.label}</span>
+        </a>
+      ))}
+    </nav>
+  );
+}
+
+function ProfileSummary({ profile }: { profile?: UserProfile | null }) {
+  const profileName = profile?.display_name || "Authenticated user";
+  const initials = profile?.display_name ? profile.display_name.slice(0, 2).toUpperCase() : "AU";
+
+  return (
+    <Card id="profile">
+      <CardHeader>
+        <CardTitle>Profile</CardTitle>
+        <span className="text-xs text-mint">Signed in</span>
+      </CardHeader>
+      <div className="flex items-center gap-3">
+        <div className="grid size-11 shrink-0 place-items-center rounded-md border border-cyan-electric/30 bg-cyan-electric/10 text-sm font-semibold text-cyan-soft">
+          {initials}
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-white">{profileName}</p>
+          <p className="truncate text-xs text-muted-foreground">{profile?.timezone || "UTC"}</p>
+        </div>
+      </div>
+      {profile?.bio ? (
+        <p className="mt-3 text-sm text-muted-foreground">{profile.bio}</p>
+      ) : null}
+    </Card>
+  );
+}
+
+function HeroCommand({ profile, onCommand }: { profile?: UserProfile | null; onCommand: (msg: string) => Promise<string | null> }) {
   const [input, setInput] = useState("");
-  const greetingName = userEmail ? userEmail.split("@")[0] : "Danish";
+  const greetingName = profile?.display_name || "User";
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -801,11 +881,39 @@ function ModuleGrid() {
 }
 
 function RemoteControl({ authFetch }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response> }) {
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [actionStatus, setActionStatus] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  async function queueDeviceAction(action: string) {
+    setPendingAction(action);
+    setActionStatus(null);
+    setActionError(null);
+
+    try {
+      const res = await authFetch("/api/devices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceId: "00000000-0000-4000-a000-000000000000", action })
+      });
+      const json = await res.json();
+      if (json?.ok) {
+        setActionStatus(`${action.replace(/_/g, " ")} queued.`);
+      } else {
+        setActionError(json?.error || "Unable to queue device command.");
+      }
+    } catch {
+      setActionError("Unable to reach device command API.");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
   return (
     <Card id="remote" className="min-h-[410px]">
       <CardHeader>
         <CardTitle>Remote Control</CardTitle>
-        <span className="text-xs text-muted-foreground">Connected to laptop</span>
+        <span className="text-xs text-muted-foreground">{pendingAction ? "Queueing command" : "Connected to laptop"}</span>
       </CardHeader>
       <div className="mb-4 flex items-center gap-3">
         <div className="grid size-10 place-items-center rounded-md bg-mint/10 text-mint">
@@ -838,93 +946,127 @@ function RemoteControl({ authFetch }: { authFetch: (input: RequestInfo, init?: R
         <Button
           variant="danger"
           className="flex-1"
-          onClick={async () => {
-            try {
-              await authFetch("/api/devices", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ deviceId: "00000000-0000-4000-a000-000000000000", action: "disconnect" })
-              });
-              console.log("Disconnect queued");
-            } catch (e) {
-              console.error(e);
-            }
-          }}
+          disabled={Boolean(pendingAction)}
+          onClick={() => queueDeviceAction("disconnect")}
         >
           <CirclePower className="size-4" />
-          Disconnect
+          {pendingAction === "disconnect" ? "Queueing..." : "Disconnect"}
         </Button>
         <Button
           variant="secondary"
           className="flex-1"
-          onClick={async () => {
-            try {
-              await authFetch("/api/devices", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ deviceId: "00000000-0000-4000-a000-000000000000", action: "fullscreen" })
-              });
-              console.log("Fullscreen requested");
-            } catch (e) {
-              console.error(e);
-            }
-          }}
+          disabled={Boolean(pendingAction)}
+          onClick={() => queueDeviceAction("fullscreen")}
         >
           <Monitor className="size-4" />
-          Full Screen
+          {pendingAction === "fullscreen" ? "Queueing..." : "Full Screen"}
         </Button>
       </div>
+      {actionStatus ? <p className="mt-3 text-xs text-mint">{actionStatus}</p> : null}
+      {actionError ? <p className="mt-3 text-xs text-danger">{actionError}</p> : null}
     </Card>
   );
 }
 
 function AutomationPanel({ authFetch }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response> }) {
-  const [localAutomations, setLocalAutomations] = useState(automations);
+  type AutomationItem = {
+    id: string;
+    title: string;
+    description?: string | null;
+    enabled?: boolean;
+    trigger?: unknown;
+  };
+
+  const [localAutomations, setLocalAutomations] = useState<AutomationItem[]>(automations);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadAutomations = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await authFetch("/api/automations");
+      const json = await res.json();
+      if (json?.ok) {
+        setLocalAutomations(json.data || []);
+      } else {
+        setError(json?.error || "Failed to load workflows.");
+      }
+    } catch {
+      setError("Unable to load workflows.");
+    } finally {
+      setLoading(false);
+    }
+  }, [authFetch]);
+
+  useEffect(() => {
+    loadAutomations();
+  }, [loadAutomations]);
 
   async function createAutomation() {
+    setSaving(true);
+    setError(null);
     try {
       const res = await authFetch("/api/automations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "New Workflow", trigger: {}, steps: [] })
+        body: JSON.stringify({ title: "New Workflow", description: "Draft workflow ready to configure", trigger: {}, steps: [] })
       });
       const json = await res.json();
       if (json?.ok && json.data) {
         setLocalAutomations((prev) => [json.data, ...prev]);
+      } else {
+        setError(json?.error || "Failed to create workflow.");
       }
-    } catch (e) {
-      console.error(e);
+    } catch {
+      setError("Unable to create workflow.");
+    } finally {
+      setSaving(false);
     }
+  }
+
+  function formatTrigger(trigger: unknown) {
+    if (typeof trigger === "string") return trigger;
+    if (trigger && typeof trigger === "object" && Object.keys(trigger).length > 0) return JSON.stringify(trigger);
+    return "Trigger not configured";
   }
 
   return (
     <Card id="automation" className="min-h-[410px]">
       <CardHeader>
         <CardTitle>Automation Workflows</CardTitle>
-        <Button variant="ghost" size="sm">
-          New
+        <Button variant="ghost" size="sm" disabled={saving} onClick={createAutomation}>
+          {saving ? "Saving" : "New"}
         </Button>
       </CardHeader>
       <div className="space-y-3">
-        {localAutomations.map((automation) => (
-          <div key={automation.id} className="flex items-center gap-3 rounded-lg border border-cyan-electric/12 bg-black/24 p-3">
-            <div className={cn("grid size-10 place-items-center rounded-md border", automation.enabled ? toneClass.mint : toneClass.danger)}>
-              <Workflow className="size-5" />
+        {loading ? (
+          <div className="rounded-lg border border-white/10 bg-black/20 p-4 text-sm text-muted-foreground">Loading workflows...</div>
+        ) : localAutomations.length === 0 ? (
+          <div className="rounded-lg border border-white/10 bg-black/20 p-4 text-sm text-muted-foreground">No workflows yet.</div>
+        ) : (
+          localAutomations.map((automation) => (
+            <div key={automation.id} className="flex items-center gap-3 rounded-lg border border-cyan-electric/12 bg-black/24 p-3">
+              <div className={cn("grid size-10 place-items-center rounded-md border", automation.enabled !== false ? toneClass.mint : toneClass.danger)}>
+                <Workflow className="size-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-white">{automation.title}</p>
+                <p className="truncate text-xs text-muted-foreground">{automation.description || "No description added yet."}</p>
+                <p className="mt-1 truncate text-xs text-cyan-soft">{formatTrigger(automation.trigger)}</p>
+              </div>
+              <span className={cn("h-6 w-11 rounded-full p-1 transition", automation.enabled !== false ? "bg-mint/70" : "bg-danger/45")}>
+                <span className={cn("block size-4 rounded-full bg-white transition", automation.enabled !== false && "translate-x-5")} />
+              </span>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="font-medium text-white">{automation.title}</p>
-              <p className="truncate text-xs text-muted-foreground">{automation.description}</p>
-              <p className="mt-1 truncate text-xs text-cyan-soft">{automation.trigger}</p>
-            </div>
-            <span className={cn("h-6 w-11 rounded-full p-1 transition", automation.enabled ? "bg-mint/70" : "bg-danger/45")}>
-              <span className={cn("block size-4 rounded-full bg-white transition", automation.enabled && "translate-x-5")} />
-            </span>
-          </div>
-        ))}
+          ))
+        )}
       </div>
-      <Button variant="secondary" className="mt-5 w-full" onClick={createAutomation}>
+      {error ? <p className="mt-3 text-xs text-danger">{error}</p> : null}
+      <Button variant="secondary" className="mt-5 w-full" disabled={saving} onClick={createAutomation}>
         <Workflow className="size-4" />
-        Create New Workflow
+        {saving ? "Creating Workflow..." : "Create New Workflow"}
       </Button>
     </Card>
   );
@@ -1109,6 +1251,181 @@ function MemoryPanel({ authFetch }: { authFetch: (input: RequestInfo, init?: Req
   );
 }
 
+function RemindersPanel({ authFetch }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response> }) {
+  type Reminder = {
+    id: string;
+    title: string;
+    body?: string | null;
+    remind_at?: string | null;
+    recurring?: string | null;
+    shared?: boolean;
+    created_at: string;
+  };
+
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [remindAt, setRemindAt] = useState("");
+  const [recurring, setRecurring] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const loadReminders = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await authFetch("/api/reminders");
+      const json = await res.json();
+      if (json?.ok) {
+        setReminders(json.data || []);
+      } else {
+        setError(json?.error || "Failed to load reminders.");
+      }
+    } catch {
+      setError("Unable to load reminders.");
+    } finally {
+      setLoading(false);
+    }
+  }, [authFetch]);
+
+  useEffect(() => {
+    loadReminders();
+  }, [loadReminders]);
+
+  async function createReminder() {
+    const cleanTitle = title.trim();
+    if (!cleanTitle) {
+      setError("Reminder title is required.");
+      setSuccess(null);
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const payload = {
+        title: cleanTitle,
+        body: body.trim() || undefined,
+        remind_at: remindAt ? new Date(remindAt).toISOString() : undefined,
+        recurring: recurring.trim() || undefined
+      };
+      const res = await authFetch("/api/reminders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const json = await res.json();
+
+      if (json?.ok) {
+        setTitle("");
+        setBody("");
+        setRemindAt("");
+        setRecurring("");
+        setSuccess("Reminder saved.");
+        await loadReminders();
+      } else {
+        setError(json?.error || "Failed to save reminder.");
+      }
+    } catch {
+      setError("Unable to save reminder.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const sortedReminders = [...reminders].sort((a, b) => {
+    const aTime = a.remind_at ? new Date(a.remind_at).getTime() : Number.MAX_SAFE_INTEGER;
+    const bTime = b.remind_at ? new Date(b.remind_at).getTime() : Number.MAX_SAFE_INTEGER;
+    return aTime - bTime;
+  });
+  const upcomingCount = reminders.filter((reminder) => reminder.remind_at && new Date(reminder.remind_at).getTime() >= Date.now()).length;
+
+  return (
+    <Card id="reminders" className="min-h-[360px]">
+      <CardHeader>
+        <CardTitle>Reminders</CardTitle>
+        <span className="text-xs text-cyan-soft">{loading ? "Syncing" : `${upcomingCount} upcoming`}</span>
+      </CardHeader>
+      <div className="space-y-4">
+        <div className="space-y-2 rounded-lg border border-cyan-electric/14 bg-black/20 p-3">
+          <p className="text-sm font-medium text-white">Create reminder</p>
+          <input
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Reminder title"
+            className="w-full rounded-md border border-white/10 bg-transparent px-3 py-2 text-sm text-white outline-none"
+          />
+          <textarea
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+            placeholder="Optional details"
+            className="w-full rounded-md border border-white/10 bg-transparent px-3 py-2 text-sm text-white outline-none"
+            rows={2}
+          />
+          <div className="grid gap-2 sm:grid-cols-[1fr_140px]">
+            <input
+              type="datetime-local"
+              value={remindAt}
+              onChange={(event) => setRemindAt(event.target.value)}
+              className="min-w-0 rounded-md border border-white/10 bg-transparent px-3 py-2 text-sm text-white outline-none"
+            />
+            <input
+              value={recurring}
+              onChange={(event) => setRecurring(event.target.value)}
+              placeholder="Repeat"
+              className="min-w-0 rounded-md border border-white/10 bg-transparent px-3 py-2 text-sm text-white outline-none"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" onClick={createReminder} disabled={saving}>
+              <CalendarDays className="size-4" />
+              {saving ? "Saving..." : "Save Reminder"}
+            </Button>
+            {success ? <span className="text-xs text-mint">{success}</span> : null}
+          </div>
+          {error ? <p className="text-xs text-danger">{error}</p> : null}
+        </div>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>Upcoming and recent reminders</span>
+            <button type="button" className="text-cyan-soft hover:text-cyan-electric" onClick={loadReminders}>
+              Refresh
+            </button>
+          </div>
+          {loading ? (
+            <div className="rounded-lg border border-white/10 bg-black/20 p-4 text-sm text-muted-foreground">Loading reminders...</div>
+          ) : sortedReminders.length === 0 ? (
+            <div className="rounded-lg border border-white/10 bg-black/20 p-4 text-sm text-muted-foreground">No reminders yet.</div>
+          ) : (
+            sortedReminders.slice(0, 6).map((reminder) => (
+              <div key={reminder.id} className="rounded-lg border border-white/10 bg-black/20 p-3">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-md border border-amber/30 bg-amber/10 text-amber">
+                    <Bell className="size-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-white">{reminder.title}</p>
+                    {reminder.body ? <p className="mt-1 text-sm leading-6 text-muted-foreground">{reminder.body}</p> : null}
+                    <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-white/70">
+                      <span>{reminder.remind_at ? new Date(reminder.remind_at).toLocaleString() : "No time set"}</span>
+                      {reminder.recurring ? <span className="text-cyan-soft">{reminder.recurring}</span> : null}
+                      {reminder.shared ? <span className="text-mint">Shared</span> : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function StudyAndCareer() {
   const pills = ["PDF to Notes", "AI Teacher", "Exam Mode", "Resume Analyzer", "Interview Coach", "Research Mode"];
   return (
@@ -1124,7 +1441,7 @@ function StudyAndCareer() {
           <p className="mt-2 text-sm text-muted-foreground">Organic Chemistry revision, 30 flashcards, one timed quiz.</p>
         </div>
         <div className="rounded-lg border border-mint/14 bg-black/24 p-4">
-          <p className="text-sm font-semibold text-white">Career Pipeline</p>
+          <p id="career" className="text-sm font-semibold text-white">Career Pipeline</p>
           <p className="mt-2 text-3xl font-semibold text-mint">12</p>
           <p className="mt-2 text-sm text-muted-foreground">Saved internships with generated resumes and cover-letter drafts.</p>
         </div>
@@ -1211,12 +1528,50 @@ function VoiceCoreMini() {
   );
 }
 
-function SystemPanel() {
+function SystemPanel({ authFetch }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response> }) {
+  type DashboardDevice = {
+    id: string;
+    name: string;
+    type?: string;
+    device_type?: string;
+    status?: string;
+  };
+
+  const [deviceList, setDeviceList] = useState<DashboardDevice[]>(devices);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadDevices = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await authFetch("/api/devices");
+      const json = await res.json();
+      if (json?.ok) {
+        setDeviceList(json.data || []);
+      } else {
+        setError(json?.error || "Failed to load devices.");
+      }
+    } catch {
+      setError("Unable to load devices.");
+    } finally {
+      setLoading(false);
+    }
+  }, [authFetch]);
+
+  useEffect(() => {
+    loadDevices();
+  }, [loadDevices]);
+
+  function getDeviceType(device: DashboardDevice) {
+    return device.device_type || device.type || "desktop";
+  }
+
   return (
-    <Card>
+    <Card id="system">
       <CardHeader>
         <CardTitle>System Overview</CardTitle>
-        <span className="text-xs text-cyan-soft">120 Mbps</span>
+        <span className="text-xs text-cyan-soft">{loading ? "Syncing" : `${deviceList.length} devices`}</span>
       </CardHeader>
       <div className="grid grid-cols-4 gap-2">
         {systemMetrics.map((metric) => (
@@ -1227,18 +1582,34 @@ function SystemPanel() {
         ))}
       </div>
       <div className="mt-4">
-        <p className="mb-2 text-xs font-semibold uppercase text-cyan-soft">Connected Devices</p>
-        <div className="space-y-2">
-          {devices.map((device) => (
-            <div key={device.id} className="flex items-center gap-3 rounded-md bg-black/22 p-2">
-              {device.type === "phone" ? <Smartphone className="size-4 text-cyan-soft" /> : <Monitor className="size-4 text-cyan-soft" />}
-              <span className="min-w-0 flex-1 truncate text-sm text-white">{device.name}</span>
-              <span className={cn("text-xs", device.status === "offline" ? "text-danger" : device.status === "idle" ? "text-amber" : "text-mint")}>
-                {device.status}
-              </span>
-            </div>
-          ))}
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <p className="text-xs font-semibold uppercase text-cyan-soft">Connected Devices</p>
+          <button type="button" className="text-xs text-cyan-soft hover:text-cyan-electric" onClick={loadDevices}>
+            Refresh
+          </button>
         </div>
+        {error ? <p className="mb-2 text-xs text-danger">{error}</p> : null}
+        {loading ? (
+          <div className="rounded-md bg-black/22 p-3 text-sm text-muted-foreground">Loading devices...</div>
+        ) : deviceList.length === 0 ? (
+          <div className="rounded-md bg-black/22 p-3 text-sm text-muted-foreground">No devices registered yet.</div>
+        ) : (
+          <div className="space-y-2">
+            {deviceList.map((device) => {
+              const deviceType = getDeviceType(device);
+              const status = device.status || "offline";
+              return (
+                <div key={device.id} className="flex items-center gap-3 rounded-md bg-black/22 p-2">
+                  {deviceType === "phone" ? <Smartphone className="size-4 text-cyan-soft" /> : <Monitor className="size-4 text-cyan-soft" />}
+                  <span className="min-w-0 flex-1 truncate text-sm text-white">{device.name}</span>
+                  <span className={cn("text-xs", status === "offline" ? "text-danger" : status === "idle" ? "text-amber" : "text-mint")}>
+                    {status}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </Card>
   );
@@ -1293,7 +1664,7 @@ function Notifications() {
 
 function QuickAccess() {
   return (
-    <Card>
+    <Card id="quick-access">
       <CardHeader>
         <CardTitle>Quick Access</CardTitle>
       </CardHeader>
