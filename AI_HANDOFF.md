@@ -117,6 +117,21 @@ Completed UI work in `components/command-center.tsx`:
 
 No backend rewrites were performed.
 
+### Phase 3 - User Profile System (Batches 1-2 Complete)
+
+#### Batch 1: Profile API & Dynamic Greeting ✅
+- Created `/api/profile/route.ts` with GET/PATCH endpoints
+- Uses existing `profiles` table (no schema changes)
+- HeroCommand greeting now uses `profile.display_name` (fallback: "User")
+- ProfileSummary shows live profile data (display_name, timezone, bio)
+
+#### Batch 2: Profile Settings UI ✅
+- Created `components/profile-settings.tsx`
+- Mobile-friendly form with display_name, bio, timezone, avatar placeholder
+- Loading/saving/error/success states
+- Integrated into CommandCenter right sidebar
+- Calls `/api/profile` PATCH on save
+
 ## Partially Completed Phases
 
 ### Phase 2
@@ -164,6 +179,9 @@ From the user's roadmap:
 - Shared space API.
 - Voice assistant browser speech recognition/synthesis flow.
 - Dashboard section navigation.
+- Profile read/update API (`/api/profile` GET/PATCH).
+- Dynamic greeting using `profile.display_name`.
+- Profile Settings UI with display_name, bio, timezone, avatar.
 
 ## Sensitive Files That Must Not Be Modified Without Explicit User Approval
 
@@ -215,6 +233,7 @@ Stable subsystems and files should not be modified unless the user explicitly ap
 | `/api/health` | GET, POST | Authenticated health tracking |
 | `/api/relationship_goals` | GET, POST | Shared relationship goals |
 | `/api/shared_space` | GET, POST | Shared spaces |
+| `/api/profile` | GET, PATCH | Profile read/update |
 
 ## Existing Database Tables
 
@@ -293,8 +312,8 @@ Do not change `lib/ai.ts` unless the user approves touching Gemini/AI internals.
 ## Current Limitations
 
 - Reminder scheduler/notifications are not implemented.
-- Profile personalization/onboarding is not implemented.
-- Static "Danish" strings remain.
+- Profile onboarding flow not implemented (profile editing works).
+- Some static "Danish" strings remain (wake-word, device names).
 - Dynamic smart dashboard suggestions are not implemented.
 - Activity timeline is not implemented.
 - Device registration/pairing/heartbeat are not implemented.
@@ -344,10 +363,12 @@ Estimated wake-word readiness: **65%**.
 
 Files created or modified by this AI:
 
-- `PROJECT_STATUS.md` - created for Phase 1 audit.
-- `components/command-center.tsx` - modified for Phase 2 dashboard/reminder/navigation improvements.
+- `PROJECT_STATUS.md` - created for Phase 1 audit, updated for Phase 3.
+- `components/command-center.tsx` - modified for Phase 2 dashboard/reminder/navigation, Phase 3 profile integration.
 - `AI_HANDOFF.md` - created for this handoff.
 - `NEXT_AGENT_PROMPT.md` - created for this handoff.
+- `app/api/profile/route.ts` - Phase 3 Batch 1: Profile API endpoints.
+- `components/profile-settings.tsx` - Phase 3 Batch 2: Profile Settings UI.
 
 Files observed but not created by this AI:
 
@@ -411,33 +432,51 @@ If changes are uncommitted:
 git restore -- components/command-center.tsx
 ```
 
+### Roll back Phase 3 Batch 1
+
+```bash
+git restore -- app/api/profile/route.ts components/command-center.tsx
+```
+
+### Roll back Phase 3 Batch 2
+
+```bash
+git restore -- components/profile-settings.tsx components/command-center.tsx
+```
+
+### Roll back full Phase 3
+
+```bash
+git checkout HEAD -- app/api/profile/route.ts components/command-center.tsx components/profile-settings.tsx
+```
+
 Do not run destructive commands such as `git reset --hard` unless the user explicitly requests it.
 
 ## Recommended Next Batch
 
-Highest-priority next batch: **Phase 3 - User Profile System, batch 1**.
+Highest-priority next batch: **Phase 3 - User Profile System, batch 3 (Onboarding Flow)**.
 
 Safest next batch:
 
-1. Add profile read/update API using the existing `profiles` table only.
-2. Add minimal profile settings UI.
-3. Replace only the easiest display-name greeting with profile data.
-4. Do not remove all hardcoded "Danish" references in one pass.
-5. Do not touch voice wake-word behavior yet, because it is stable and user considers it important.
+1. Add onboarding flow component for first-time users.
+2. Track onboarding completion in profile (requires schema addition or use existing field).
+3. Replace remaining hardcoded "Danish" references (wake-word, device names).
+4. Do not touch voice wake-word behavior yet, because it is stable and user considers it important.
 
 Most valuable next batch:
 
-- Begin Phase 3 with onboarding/profile preferences because it unlocks dynamic greetings, user-specific device names, profile settings, and later smart dashboard personalization.
+- Onboarding flow unlocks personalized experience for new users.
+- Removing remaining hardcoded references completes user personalization.
 
 ## Roadmap Completion Estimates
 
 These are engineering estimates based on repository inspection, not product claims:
 
-- Overall completion: **24%**
-- Backend completion: **42%**
-- Frontend completion: **34%**
+- Overall completion: **30%**
+- Backend completion: **45%**
+- Frontend completion: **40%**
 - AI completion: **48%**
 - Device control completion: **12%**
 - APK readiness: **8%**
 
-Estimated remaining phases: **12 major phases** remain, because Phases 3-14 are not complete and Phase 2 still has polish/testing limitations.
+Estimated remaining phases: **11 major phases** remain (Phases 3-14, with Phase 3 batches 1-2 complete).

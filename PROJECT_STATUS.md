@@ -152,11 +152,8 @@ The schema also enables RLS and defines owner/shared access policies for the abo
 ## Missing Features
 
 - Onboarding flow after login.
-- Profile Settings page.
-- Edit Profile page.
-- Avatar support UI.
-- User preferences UI and persistence beyond basic `profiles.display_name` and `timezone`.
-- Dynamic greeting based on profile name/nickname.
+- Avatar upload/update UI (avatar_url field exists, upload not implemented).
+- User preferences UI and persistence beyond basic `profiles.display_name`, `timezone`, `bio`.
 - Dynamic dashboard suggestions from memories, tasks, study goals, activity history, or device usage.
 - Activity timeline table/API/panel for memory/reminder/internship/automation/device/study events.
 - Device registration and pairing flow.
@@ -185,7 +182,6 @@ Hardcoded or mock-backed areas found:
 
 - `data/dashboard.ts` contains static devices, automations, modules, recent actions, command examples, quick actions, and knowledge blocks.
 - Hardcoded device names include "Danish's Laptop" and "Danish's Phone".
-- `components/command-center.tsx` contains fallback greeting name "Danish".
 - Mobile voice card displays "Good Evening, Danish."
 - Voice wake-word/status copy uses "Hello Danish".
 - Remote quick actions currently use a placeholder UUID device id.
@@ -194,6 +190,13 @@ Hardcoded or mock-backed areas found:
 - Study/Career and Content Factory panels are mostly static product surfaces.
 - Notifications are derived from static `recentActions`.
 - Command examples are permanent static examples rather than dynamic suggestions.
+
+### Resolved in Phase 3
+- `components/command-center.tsx` fallback greeting "Danish" → now uses `profile.display_name` (Batch 1)
+- Profile Settings page → implemented (Batch 2)
+- Edit Profile page → implemented (Batch 2)
+- Dynamic greeting based on profile name → implemented (Batch 1)
+- User preferences UI for display_name, bio, timezone → implemented (Batch 2)
 
 ## API Coverage
 
@@ -215,10 +218,9 @@ Hardcoded or mock-backed areas found:
 
 ### Missing API Coverage
 
-- Profile read/update.
 - Onboarding completion.
 - Avatar upload/update.
-- User preferences.
+- User preferences (beyond display_name, bio, timezone).
 - Activity timeline.
 - Device pairing/approval.
 - Device heartbeat.
@@ -320,6 +322,25 @@ Based on the requested strategy, the safest next batch should focus on the exist
 3. Add a simple due/upcoming reminder grouping using the existing `/api/reminders` route.
 4. Keep scheduler/cron work out of the first Phase 2 batch unless explicitly approved.
 
+## Completed Phases
+
+### Phase 3 - User Profile System (In Progress)
+
+#### Batch 1: Profile API & Dynamic Greeting ✅
+- Created `/api/profile/route.ts` with GET/PATCH endpoints
+- Uses existing `profiles` table (no schema changes)
+- HeroCommand greeting now uses `profile.display_name` (fallback: "User")
+- ProfileSummary shows live profile data (display_name, timezone, bio)
+
+#### Batch 2: Profile Settings UI ✅
+- Created `components/profile-settings.tsx`
+- Mobile-friendly form with display_name, bio, timezone, avatar placeholder
+- Loading/saving/error/success states
+- Integrated into CommandCenter right sidebar
+- Calls `/api/profile` PATCH on save
+
+---
+
 ## Verification Performed
 
 - Inspected repository structure and tracked/untracked state.
@@ -328,17 +349,28 @@ Based on the requested strategy, the safest next batch should focus on the exist
 - Read authentication, assistant, memory, reminder, device, automation, job, health, relationship goal, and shared space API routes.
 - Read authentication provider/gate and main dashboard entry points.
 - Scanned for hardcoded names, mock data, placeholder usage, PWA/APK indicators, and mobile readiness clues.
+- Phase 3 Batch 1: TypeScript, ESLint, Build, API GET/PATCH, Dashboard rendering - ALL PASS
+- Phase 3 Batch 2: TypeScript, ESLint, Build, API GET/PATCH, Dashboard rendering - ALL PASS
 
-## Files Changed In This Batch
+## Files Changed In Phase 3
 
-- `PROJECT_STATUS.md` added.
+- `app/api/profile/route.ts` - Profile API endpoints
+- `components/command-center.tsx` - Dynamic greeting, profile integration
+- `components/profile-settings.tsx` - Profile settings UI
 
 ## Rollback Instructions
 
-To roll back this audit batch only, delete:
-
-```text
-PROJECT_STATUS.md
+### Phase 3 Batch 1
+```bash
+git restore -- app/api/profile/route.ts components/command-center.tsx
 ```
 
-No application source code, database schema, API route, authentication, Gemini, memory, or device command file was changed.
+### Phase 3 Batch 2
+```bash
+git restore -- components/profile-settings.tsx components/command-center.tsx
+```
+
+### Full Phase 3
+```bash
+git checkout HEAD -- app/api/profile/route.ts components/command-center.tsx components/profile-settings.tsx
+```
