@@ -86,11 +86,118 @@ type SpeechRecognitionLike = EventTarget & {
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
+type VoiceLanguage = "hindi" | "hinglish" | "english";
+
 declare global {
   interface Window {
     SpeechRecognition?: SpeechRecognitionConstructor;
     webkitSpeechRecognition?: SpeechRecognitionConstructor;
   }
+}
+
+function detectVoiceLanguage(text: string): VoiceLanguage {
+  const normalized = text.toLowerCase();
+  if (/[\u0900-\u097F]/.test(text)) return "hindi";
+
+  const hinglishWords = normalized.match(/\b(kya|kaise|kaisa|kaisi|kyu|kyun|nahi|nahin|haan|han|hai|hain|ho|hu|hun|mera|meri|mere|mujhe|tum|aap|apna|batao|bata|karna|karo|chahiye|acha|achha|theek|thik|yaar|bhai|kal|aaj|abhi|wala|wali|matlab)\b/g) ?? [];
+  if (hinglishWords.length >= 2) return "hinglish";
+
+  return "english";
+}
+
+function getSpeechVoices() {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return [];
+  return window.speechSynthesis.getVoices();
+}
+
+function findVoiceByLanguage(voices: SpeechSynthesisVoice[], language: string) {
+  const wanted = language.toLowerCase();
+  return voices.find((voice) => voice.lang.toLowerCase() === wanted)
+    ?? voices.find((voice) => voice.lang.toLowerCase().startsWith(wanted.split("-")[0]));
+}
+
+function describeSpeechError(event?: SpeechSynthesisErrorEvent) {
+  if (!event) return null;
+  return {
+    error: event.error || "unknown",
+    elapsedTime: event.elapsedTime,
+    charIndex: event.charIndex,
+    name: event.name,
+    type: event.type
+  };
+}
+
+function waitForSpeechVoices(timeoutMs = 2500) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return Promise.resolve([]);
+
+  const immediateVoices = getSpeechVoices();
+  if (immediateVoices.length > 0) return Promise.resolve(immediateVoices);
+
+  console.log("[VOICE] Speech voices not ready; waiting for voiceschanged");
+
+  return new Promise<SpeechSynthesisVoice[]>((resolve) => {
+    let settled = false;
+    const startedAt = Date.now();
+
+    const finish = (reason: string) => {
+      if (settled) return;
+      settled = true;
+      window.clearInterval(pollId);
+      window.clearTimeout(timeoutId);
+      window.speechSynthesis.removeEventListener("voiceschanged", onVoicesChanged);
+
+      const voices = getSpeechVoices();
+      console.log("[VOICE] Speech voice loading finished:", {
+        reason,
+        voiceCount: voices.length,
+        waitedMs: Date.now() - startedAt
+      });
+      resolve(voices);
+    };
+
+    const onVoicesChanged = () => {
+      if (getSpeechVoices().length > 0) finish("voiceschanged");
+    };
+
+    const pollId = window.setInterval(() => {
+      if (getSpeechVoices().length > 0) finish("poll");
+    }, 150);
+
+    const timeoutId = window.setTimeout(() => finish("timeout"), timeoutMs);
+    window.speechSynthesis.addEventListener("voiceschanged", onVoicesChanged);
+  });
+}
+
+function selectSpeechVoice(text: string, voices = getSpeechVoices()) {
+  const detectedLanguage = detectVoiceLanguage(text);
+  const requestedLang = detectedLanguage === "hindi" ? "hi-IN" : detectedLanguage === "hinglish" ? "en-IN" : "en-IN";
+  const fallbackLangs = requestedLang === "hi-IN" ? ["en-IN", "en-US"] : ["hi-IN", "en-US"];
+  const selectedVoice = findVoiceByLanguage(voices, requestedLang)
+    ?? fallbackLangs.map((lang) => findVoiceByLanguage(voices, lang)).find(Boolean)
+    ?? voices[0]
+    ?? null;
+
+  const selectedLang = selectedVoice?.lang || fallbackLangs[0] || requestedLang;
+  console.log("[VOICE] Detected input language:", detectedLanguage);
+  console.log("[VOICE] Speech synthesis support:", {
+    "hi-IN": Boolean(findVoiceByLanguage(voices, "hi-IN")),
+    "en-IN": Boolean(findVoiceByLanguage(voices, "en-IN")),
+    "en-US": Boolean(findVoiceByLanguage(voices, "en-US")),
+    voiceCount: voices.length
+  });
+  console.log("[VOICE] TTS selected voice:", selectedVoice ? {
+    name: selectedVoice.name,
+    lang: selectedVoice.lang,
+    requestedLang,
+    fallbackUsed: selectedVoice.lang.toLowerCase() !== requestedLang.toLowerCase()
+  } : {
+    name: null,
+    lang: selectedLang,
+    requestedLang,
+    fallbackUsed: selectedLang.toLowerCase() !== requestedLang.toLowerCase()
+  });
+
+  return { selectedVoice, selectedLang };
 }
 
 // client no longer sends a default user id; server derives user from Authorization header
@@ -326,45 +433,156 @@ function VoiceAssistant({ onSendMessage }: { onSendMessage: (msg: string) => Pro
   const listeningRef = useRef(false);
   const activatedRef = useRef(false);
   const speakingRef = useRef(false);
+  const recognitionPausedRef = useRef(false);
   const cooldownUntilRef = useRef(0);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const speechQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [supported, setSupported] = useState(true);
   const [enabled, setEnabled] = useState(false);
   const [activated, setActivated] = useState(false);
   const [status, setStatus] = useState("Wake word off");
   const [lastTranscript, setLastTranscript] = useState("");
 
-  const speak = useCallback((text: string) => {
-    if (!("speechSynthesis" in window)) return Promise.resolve();
+  const pauseRecognition = useCallback((reason: string) => {
+    recognitionPausedRef.current = true;
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
 
-    return new Promise<void>((resolve) => {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.96;
-      utterance.pitch = 1;
-      utterance.volume = 1;
-      speakingRef.current = true;
-      utterance.onend = () => {
-        speakingRef.current = false;
-        resolve();
-      };
-      utterance.onerror = () => {
-        speakingRef.current = false;
-        resolve();
-      };
-      window.speechSynthesis.speak(utterance);
-    });
+    if (!recognitionRef.current) return;
+
+    try {
+      recognitionRef.current.stop();
+      console.log("[VOICE] Recognition paused:", { reason, wasListening: listeningRef.current });
+    } catch (error) {
+      console.warn("[VOICE] Recognition pause failed:", {
+        reason,
+        error: error instanceof Error ? { name: error.name, message: error.message } : error
+      });
+    } finally {
+      listeningRef.current = false;
+    }
   }, []);
 
+  const speak = useCallback((text: string) => {
+    if (!("speechSynthesis" in window)) {
+      console.warn("[VOICE] Speech synthesis is not supported in this browser");
+      return Promise.resolve();
+    }
+
+    const speechText = text.trim();
+    if (!speechText) return Promise.resolve();
+
+    const speakOnce = async () => {
+      const voices = await waitForSpeechVoices();
+      const { selectedVoice, selectedLang } = selectSpeechVoice(speechText, voices);
+      pauseRecognition("tts-start");
+
+      return new Promise<void>((resolve) => {
+        console.log("[VOICE] TTS preparing:", {
+          textLength: speechText.length,
+          selectedLang,
+          selectedVoice: selectedVoice ? `${selectedVoice.name} (${selectedVoice.lang})` : null,
+          pending: window.speechSynthesis.pending,
+          speaking: window.speechSynthesis.speaking,
+          paused: window.speechSynthesis.paused
+        });
+
+        if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+          console.log("[VOICE] TTS clearing existing browser queue before speaking");
+          window.speechSynthesis.cancel();
+        }
+
+        const utterance = new SpeechSynthesisUtterance(speechText);
+        utterance.lang = selectedLang;
+        if (selectedVoice) utterance.voice = selectedVoice;
+        utterance.rate = 0.96;
+        utterance.pitch = 1;
+        utterance.volume = 1;
+        speakingRef.current = true;
+
+        let settled = false;
+        const timeoutMs = Math.min(Math.max(speechText.length * 90, 5000), 30000);
+        const finish = (eventName: string, event?: SpeechSynthesisEvent | SpeechSynthesisErrorEvent) => {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timeoutId);
+          speakingRef.current = false;
+          if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+          console.log(`[VOICE] TTS ${eventName}:`, {
+            lang: utterance.lang,
+            voice: utterance.voice ? `${utterance.voice.name} (${utterance.voice.lang})` : null,
+            elapsedTime: event?.elapsedTime ?? null,
+            charIndex: event?.charIndex ?? null,
+            browserState: {
+              pending: window.speechSynthesis.pending,
+              speaking: window.speechSynthesis.speaking,
+              paused: window.speechSynthesis.paused
+            }
+          });
+          resolve();
+        };
+
+      const timeoutId = window.setTimeout(() => {
+  console.warn("[VOICE] TTS timeout reached:", {
+    timeoutMs,
+    textLength: speechText.length,
+    lang: utterance.lang
+  });
+
+  finish("timeout");
+}, 60000); // 60 seconds
+
+        utterance.onstart = (event) => {
+          console.log("[VOICE] TTS start:", {
+            lang: utterance.lang,
+            voice: utterance.voice ? `${utterance.voice.name} (${utterance.voice.lang})` : null,
+            elapsedTime: event.elapsedTime,
+            charIndex: event.charIndex
+          });
+        };
+        utterance.onend = (event) => {
+          finish("end", event);
+        };
+        utterance.onerror = (event) => {
+          console.error("[VOICE] TTS error:", {
+            event: describeSpeechError(event),
+            lang: utterance.lang,
+            voice: utterance.voice ? `${utterance.voice.name} (${utterance.voice.lang})` : null,
+            textLength: speechText.length,
+            browserState: {
+              pending: window.speechSynthesis.pending,
+              speaking: window.speechSynthesis.speaking,
+              paused: window.speechSynthesis.paused
+            }
+          });
+          finish("error", event);
+        };
+        window.speechSynthesis.speak(utterance);
+      });
+    };
+
+    const queuedSpeech = speechQueueRef.current.catch(() => undefined).then(speakOnce);
+    speechQueueRef.current = queuedSpeech;
+    return queuedSpeech;
+  }, [pauseRecognition]);
+
   const restartListening = useCallback(() => {
-    if (!enabled || listeningRef.current || speakingRef.current) return;
+    if (!enabled || listeningRef.current || speakingRef.current || recognitionPausedRef.current) return;
     if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
     restartTimerRef.current = setTimeout(() => {
       try {
         recognitionRef.current?.start();
         listeningRef.current = true;
         setStatus(activatedRef.current ? "Listening for your command..." : "Listening for \"Hello Danish\"...");
-      } catch {
+      } catch (error) {
+        console.warn("[VOICE] Recognition start failed:", {
+          error: error instanceof Error ? { name: error.name, message: error.message } : error,
+          enabled,
+          pausedForSpeech: recognitionPausedRef.current,
+          speaking: speakingRef.current
+        });
         listeningRef.current = false;
       }
     }, 250);
@@ -373,16 +591,19 @@ function VoiceAssistant({ onSendMessage }: { onSendMessage: (msg: string) => Pro
   const processCommand = useCallback(async (command: string) => {
     const cleaned = command.trim();
     if (!cleaned) return;
+    console.log("[VOICE] Detected input language:", detectVoiceLanguage(cleaned));
 
+    pauseRecognition("processing-command");
     setStatus("Thinking...");
     const response = await onSendMessage(cleaned);
     if (response) {
       setStatus("Speaking...");
       await speak(response);
     }
+    recognitionPausedRef.current = false;
     setStatus("Listening for your command...");
     restartListening();
-  }, [onSendMessage, restartListening, speak]);
+  }, [onSendMessage, pauseRecognition, restartListening, speak]);
 
   const handleTranscript = useCallback(async (transcript: string) => {
     const cleaned = transcript.trim();
@@ -396,24 +617,23 @@ function VoiceAssistant({ onSendMessage }: { onSendMessage: (msg: string) => Pro
       activatedRef.current = true;
       setActivated(true);
       setStatus("Activated");
-      recognitionRef.current?.stop();
-      listeningRef.current = false;
+      pauseRecognition("wake-word");
       await speak("Hello Danish, how can I help you today?");
 
       const commandAfterWake = cleaned.replace(/hello danish/i, "").trim();
       if (commandAfterWake) {
         await processCommand(commandAfterWake);
       } else {
+        recognitionPausedRef.current = false;
         setStatus("Listening for your command...");
         restartListening();
       }
       return;
     }
 
-    recognitionRef.current?.stop();
-    listeningRef.current = false;
+    pauseRecognition("command-captured");
     await processCommand(cleaned);
-  }, [processCommand, restartListening, speak]);
+  }, [pauseRecognition, processCommand, restartListening, speak]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -430,6 +650,14 @@ function VoiceAssistant({ onSendMessage }: { onSendMessage: (msg: string) => Pro
     recognition.interimResults = false;
     recognition.lang = "en-IN";
     recognition.onresult = (event) => {
+      if (recognitionPausedRef.current || speakingRef.current) {
+        console.log("[VOICE] Recognition result ignored while paused/speaking:", {
+          pausedForSpeech: recognitionPausedRef.current,
+          speaking: speakingRef.current
+        });
+        return;
+      }
+
       let finalText = "";
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
         const result = event.results[index];
@@ -437,11 +665,23 @@ function VoiceAssistant({ onSendMessage }: { onSendMessage: (msg: string) => Pro
       }
       if (finalText) void handleTranscript(finalText);
     };
-    recognition.onerror = () => {
+    recognition.onerror = (event) => {
+      const recognitionError = event as Event & { error?: string; message?: string };
+      console.warn("[VOICE] Recognition error:", {
+        error: recognitionError.error ?? "unknown",
+        message: recognitionError.message ?? null,
+        pausedForSpeech: recognitionPausedRef.current,
+        speaking: speakingRef.current
+      });
       listeningRef.current = false;
-      setStatus("Mic paused. Restarting...");
+      if (!recognitionPausedRef.current && !speakingRef.current) setStatus("Mic paused. Restarting...");
     };
     recognition.onend = () => {
+      console.log("[VOICE] Recognition ended:", {
+        enabled,
+        pausedForSpeech: recognitionPausedRef.current,
+        speaking: speakingRef.current
+      });
       listeningRef.current = false;
       restartListening();
     };
@@ -460,12 +700,40 @@ function VoiceAssistant({ onSendMessage }: { onSendMessage: (msg: string) => Pro
     };
   }, [enabled, handleTranscript, restartListening]);
 
+  useEffect(() => {
+    if (!("speechSynthesis" in window)) return;
+
+    const logVoiceSupport = () => {
+      const voices = getSpeechVoices();
+      console.log("[VOICE] Available speech synthesis voices:", voices.map((voice) => ({ name: voice.name, lang: voice.lang })));
+      console.log("[VOICE] Speech synthesis support:", {
+        "hi-IN": Boolean(findVoiceByLanguage(voices, "hi-IN")),
+        "en-IN": Boolean(findVoiceByLanguage(voices, "en-IN")),
+        "en-US": Boolean(findVoiceByLanguage(voices, "en-US"))
+      });
+    };
+
+    logVoiceSupport();
+    window.speechSynthesis.onvoiceschanged = logVoiceSupport;
+
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
+
   const toggleListening = async () => {
     if (enabled) {
       setEnabled(false);
       setActivated(false);
       activatedRef.current = false;
+      recognitionPausedRef.current = false;
+      speakingRef.current = false;
+      if (restartTimerRef.current) {
+        clearTimeout(restartTimerRef.current);
+        restartTimerRef.current = null;
+      }
       setStatus("Wake word off");
+      console.log("[VOICE] Voice mode stopped; cancelling recognition and speech");
       window.speechSynthesis?.cancel();
       recognitionRef.current?.stop();
       return;

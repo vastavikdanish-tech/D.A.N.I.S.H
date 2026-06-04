@@ -14,6 +14,29 @@ type GeminiFunctionCall = {
   };
 };
 
+type GeminiPart = {
+  text?: string;
+  functionCall?: GeminiFunctionCall["functionCall"];
+};
+
+type GeminiCandidate = {
+  content?: {
+    parts?: GeminiPart[];
+  };
+  finishReason?: string;
+  safetyRatings?: unknown;
+};
+
+type GeminiGenerateContentResponse = {
+  candidates?: GeminiCandidate[];
+  promptFeedback?: {
+    blockReason?: string;
+    safetyRatings?: unknown;
+  };
+  modelVersion?: string;
+  usageMetadata?: unknown;
+};
+
 export type AssistantToolResult = {
   call: GeminiFunctionCall;
   result: unknown;
@@ -23,6 +46,8 @@ type AssistantResponse =
   | { provider: "gemini"; content: string; toolCalls?: never }
   | { provider: "gemini"; toolCalls: GeminiFunctionCall[]; content?: never };
 
+type AssistantLanguage = "hindi" | "hinglish" | "english";
+
 const systemPrompts: Record<AssistantMode, string> = {
   assistant: "You are D.A.N.I.S.H, a warm, emotionally aware conversational AI operating system. Speak naturally, vary short and detailed answers based on the moment, and remember useful facts about the user. Use tools proactively for durable facts, preferences, goals, and ongoing context. Check existing memories before duplicating. Assign importance (1-10) to every memory. Keep most replies concise unless the user needs depth.",
   study: "You are Study OS inside D.A.N.I.S.H. Teach clearly and automatically save key study progress or facts learned about the user.",
@@ -30,6 +55,45 @@ const systemPrompts: Record<AssistantMode, string> = {
   content: "You are Content Factory inside D.A.N.I.S.H. Produce assets and remember the user's content style and brand voice.",
   automation: "You are Automation Engine inside D.A.N.I.S.H. Convert goals into workflows and remember user routine preferences."
 };
+
+function detectAssistantLanguage(text: string): AssistantLanguage {
+  const normalized = text.toLowerCase();
+  const hasDevanagari = /[\u0900-\u097F]/.test(text);
+  if (hasDevanagari) return "hindi";
+
+  const hinglishWords = normalized.match(/\b(kya|kaise|kaisa|kaisi|kyu|kyun|nahi|nahin|haan|han|hai|hain|ho|hu|hun|mera|meri|mere|mujhe|tum|aap|apna|batao|bata|karna|karo|chahiye|acha|achha|theek|thik|yaar|bhai|kal|aaj|abhi|wala|wali|matlab)\b/g) ?? [];
+  if (hinglishWords.length >= 2) return "hinglish";
+
+  return "english";
+}
+
+function getLanguageInstruction(language: AssistantLanguage) {
+  return `
+LANGUAGE RULES:
+
+You are D.A.N.I.S.H.
+
+The owner prefers Hindi.
+
+Always reply in natural Hindi written in Devanagari script.
+
+Examples:
+
+User: kya haal hai
+Assistant: क्या हाल है?
+
+User: tum kaun ho
+Assistant: मैं D.A.N.I.S.H हूँ।
+
+Only use English when:
+- the user explicitly asks for English
+- code is being shown
+- technical terms require English
+
+Do not describe yourself as a Hinglish assistant.
+Do not force Roman-script replies.
+`;
+}
 
 export async function generateEmbedding(text: string) {
   const geminiKey = process.env.GEMINI_API_KEY;
@@ -81,12 +145,13 @@ export async function generateAssistantResponse(
   const geminiKey = process.env.GEMINI_API_KEY;
   const geminiUrl = process.env.GEMINI_API_URL;
   const envModel = process.env.GEMINI_MODEL;
-  const primaryModel = envModel || "gemini-2.0-flash";
-  const availableModels = [
+  const primaryModel = envModel || "gemini-2.5-flash";
+  const availableModels = Array.from(new Set([
     primaryModel,
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
-    "gemini-1.5-flash",
-  ].filter(Boolean);
+  ].filter(Boolean)));
 
   if (!geminiKey) {
     throw new Error("Gemini configuration missing: GEMINI_API_KEY is required.");
@@ -105,7 +170,10 @@ export async function generateAssistantResponse(
         .join("\n")}\n\nNow answer the user naturally. Do not mention internal tool mechanics unless it helps the user.\n\n`
     : "";
 
-  const promptText = `${systemPrompts[mode]}\n\n${memoryContext}${toolContext}User message: ${message}`;
+  const detectedInputLanguage = detectAssistantLanguage(message);
+  console.log("[AI_LIB] Detected input language:", detectedInputLanguage);
+
+  const promptText = `${systemPrompts[mode]}\n\n${getLanguageInstruction(detectedInputLanguage)}\n\n${memoryContext}${toolContext}User message: ${message}`;
   console.log("[AI_LIB] Final promptText length:", promptText.length);
   // console.log("[AI_LIB] promptText:", promptText); // Optional: can be very long
   
@@ -237,34 +305,80 @@ export async function generateAssistantResponse(
       throw new Error(`Gemini API returned ${res.status}: ${responseText}`);
     }
 
-    const json: {
-      candidates?: Array<{
-        content?: {
-          parts?: Array<{ text?: string; functionCall?: GeminiFunctionCall["functionCall"] }>;
-        };
-      }>;
-    } = JSON.parse(responseText);
-    console.log("[AI_LIB] Gemini candidate content parts length:", json?.candidates?.[0]?.content?.parts?.length);
-    const candidate = json?.candidates?.[0];
-    const part = candidate?.content?.parts?.[0];
+    console.log("[AI_LIB] Raw Gemini response:", responseText);
 
-    if (part?.functionCall && !toolResults?.length) {
-      console.log("[AI_LIB] Gemini returned functionCall:", part.functionCall.name);
+    let json: GeminiGenerateContentResponse;
+    try {
+      json = JSON.parse(responseText);
+    } catch {
+      console.error("[AI_LIB] Gemini returned invalid JSON:", responseText);
+      return { provider: "gemini", content: "Gemini returned an empty response." };
+    }
+
+    console.log("[AI_LIB] Complete Gemini response:", JSON.stringify(json, null, 2));
+    console.log("[AI_LIB] Gemini response shape:", JSON.stringify({
+      modelVersion: json.modelVersion ?? null,
+      promptBlockReason: json.promptFeedback?.blockReason ?? null,
+      candidateCount: json.candidates?.length ?? 0,
+      candidates: json.candidates?.map((candidate, index) => ({
+        index,
+        finishReason: candidate.finishReason ?? null,
+        hasContent: Boolean(candidate.content),
+        partCount: candidate.content?.parts?.length ?? 0,
+        partTypes: candidate.content?.parts?.map((part) => ({
+          hasText: typeof part.text === "string",
+          textLength: part.text?.length ?? 0,
+          hasFunctionCall: Boolean(part.functionCall),
+          functionName: part.functionCall?.name ?? null
+        })) ?? [],
+        hasSafetyRatings: Boolean(candidate.safetyRatings)
+      })) ?? []
+    }, null, 2));
+
+    if (json.promptFeedback?.blockReason) {
+      console.warn("[AI_LIB] Gemini prompt was blocked:", json.promptFeedback.blockReason);
+      return { provider: "gemini", content: "Gemini returned an empty response." };
+    }
+
+    const candidates = json.candidates ?? [];
+    if (!candidates.length) {
+      console.warn("[AI_LIB] Gemini returned no candidates.");
+      return { provider: "gemini", content: "Gemini returned an empty response." };
+    }
+
+    const allParts = candidates.flatMap((candidate) => candidate.content?.parts ?? []);
+    const toolCalls = allParts
+      .filter((part): part is { functionCall: GeminiFunctionCall["functionCall"] } => Boolean(part.functionCall))
+      .map((part) => ({ functionCall: part.functionCall }));
+
+    if (toolCalls.length && !toolResults?.length) {
+      console.log("[AI_LIB] Gemini returned functionCall(s):", toolCalls.map((call) => call.functionCall.name).join(", "));
       return {
         provider: "gemini",
-        toolCalls: candidate?.content?.parts
-          ?.filter((p): p is { functionCall: GeminiFunctionCall["functionCall"] } => Boolean(p.functionCall))
-          .map((p) => ({ functionCall: p.functionCall })) ?? []
+        toolCalls
       };
     }
 
-    const text = part?.text;
-    if (!text) {
-      console.error("[AI_LIB] Gemini error response:", responseText);
-      throw new Error(`Gemini did not return expected content. Raw response: ${responseText}`);
+    const text = allParts
+      .map((part) => part.text?.trim() ?? "")
+      .filter(Boolean)
+      .join("\n\n");
+
+    if (text) {
+      console.log("[AI_LIB] Gemini response language:", detectAssistantLanguage(text));
+      return { provider: "gemini", content: text };
     }
 
-    return { provider: "gemini", content: text };
+    const safetyFinish = candidates.some((candidate) => candidate.finishReason === "SAFETY" || candidate.finishReason === "BLOCKLIST");
+    if (safetyFinish) {
+      console.warn("[AI_LIB] Gemini response was safety-filtered.");
+    } else if (toolCalls.length) {
+      console.warn("[AI_LIB] Gemini returned functionCall(s) when a text answer was expected.");
+    } else {
+      console.warn("[AI_LIB] Gemini returned candidates without text parts.");
+    }
+
+    return { provider: "gemini", content: "Gemini returned an empty response." };
   }
 
   let lastError: Error | null = null;
