@@ -41,6 +41,7 @@ import { formatPercent, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProfileSettings } from "@/components/profile-settings";
+import { Onboarding } from "@/components/onboarding";
 
 const menu = [
   { label: "Dashboard", icon: LayoutDashboard, href: "#dashboard" },
@@ -218,6 +219,7 @@ export function CommandCenter() {
   const [messages, setMessages] = useState<Array<{ role: string; text: string }>>([]);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const authFetch = useCallback(async (input: RequestInfo, init: RequestInit = {}) => {
     const headers = new Headers(init.headers ?? {});
@@ -245,6 +247,9 @@ export function CommandCenter() {
         const json = await res.json();
         if (json?.ok && json.data) {
           setProfile(json.data);
+          if (!json.data.display_name) {
+            setShowOnboarding(true);
+          }
         }
       } catch (e) {
         console.error("Failed to load profile:", e);
@@ -254,6 +259,10 @@ export function CommandCenter() {
     }
     loadProfile();
   }, [authFetch, user?.email]);
+
+  const handleOnboardingComplete = () => {
+    setShowOnboarding(false);
+  };
 
   const submitAssistant = useCallback(async (message: string, mode: string = "assistant") => {
     if (!message) return null;
