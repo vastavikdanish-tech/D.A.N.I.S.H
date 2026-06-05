@@ -13,14 +13,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Supabase unavailable" }, { status: 500 });
   }
 
-  const { device_id, approved } = await request.json().catch(() => ({}));
+  const { device_id } = await request.json().catch(() => ({}));
   if (!device_id) {
     return NextResponse.json({ ok: false, error: "device_id required" }, { status: 400 });
   }
 
   const { data: device, error: fetchError } = await supabase
     .from("devices")
-    .select("id, user_id")
+    .select("id, user_id, health")
     .eq("id", device_id)
     .single();
 
@@ -32,11 +32,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Device does not belong to you" }, { status: 403 });
   }
 
-  const newStatus = approved ? "online" : "offline";
+  const currentHealth = (device.health as Record<string, unknown>) || {};
+  const updatedHealth = { ...currentHealth, approved: true };
+
   const { data, error } = await supabase.from("devices").update({
-    status: newStatus,
+    status: "online",
+    health: updatedHealth,
     last_seen_at: new Date().toISOString(),
-  }).eq("id", device_id).select("id, name, status, device_type").single();
+  }).eq("id", device_id).select("id, name, status, device_type, health").single();
 
   if (error) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });

@@ -1086,6 +1086,7 @@ function RemoteControl({ authFetch }: { authFetch: (input: RequestInfo, init?: R
   const [actionStatus, setActionStatus] = useState<string | null>(null);
   const [pairingToken, setPairingToken] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [approving, setApproving] = useState<string | null>(null);
 
   const loadDevices = useCallback(async () => {
     try {
@@ -1125,14 +1126,26 @@ function RemoteControl({ authFetch }: { authFetch: (input: RequestInfo, init?: R
   }
 
   async function approveDevice(deviceId: string) {
+    setApproving(deviceId);
+    setActionStatus(null);
     try {
-      await authFetch("/api/devices/approve", {
+      const res = await authFetch("/api/devices/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ device_id: deviceId })
       });
+      const json = await res.json();
+      if (json?.ok) {
+        setActionStatus("Device approved! Refresh to see commands flowing.");
+      } else {
+        setActionStatus(json?.error || "Approval failed.");
+      }
       loadDevices();
-    } catch { /* ignore */ }
+    } catch {
+      setActionStatus("Approval request failed.");
+    } finally {
+      setApproving(null);
+    }
   }
 
   async function generatePairingToken() {
@@ -1201,8 +1214,8 @@ function RemoteControl({ authFetch }: { authFetch: (input: RequestInfo, init?: R
                 <p className="font-medium text-white">{device.name || "New Device"}</p>
                 <p className="text-xs text-muted-foreground">Pending approval</p>
               </div>
-              <Button size="sm" variant="secondary" onClick={() => device.id && approveDevice(device.id)}>
-                Approve
+              <Button size="sm" variant="secondary" disabled={approving === device.id} onClick={() => device.id && approveDevice(device.id)}>
+                {approving === device.id ? "Approving..." : "Approve"}
               </Button>
             </div>
           ))}

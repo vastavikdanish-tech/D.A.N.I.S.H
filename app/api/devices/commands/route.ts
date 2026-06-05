@@ -38,7 +38,7 @@ export async function GET(request: Request) {
     .from("device_commands")
     .select("id, command, payload, status, created_at")
     .eq("device_id", deviceId)
-    .in("status", ["pending", "approved"])
+    .in("status", ["queued"])
     .order("created_at", { ascending: true })
     .limit(10);
 
