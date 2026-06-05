@@ -119,24 +119,11 @@ function findVoiceByLanguage(voices: SpeechSynthesisVoice[], language: string) {
     ?? voices.find((voice) => voice.lang.toLowerCase().startsWith(wanted.split("-")[0]));
 }
 
-function describeSpeechError(event?: SpeechSynthesisErrorEvent) {
-  if (!event) return null;
-  return {
-    error: event.error || "unknown",
-    elapsedTime: event.elapsedTime,
-    charIndex: event.charIndex,
-    name: event.name,
-    type: event.type
-  };
-}
-
 function waitForSpeechVoices(timeoutMs = 2500) {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) return Promise.resolve([]);
 
   const immediateVoices = getSpeechVoices();
   if (immediateVoices.length > 0) return Promise.resolve(immediateVoices);
-
-  console.log("[VOICE] Speech voices not ready; waiting for voiceschanged");
 
   return new Promise<SpeechSynthesisVoice[]>((resolve) => {
     let settled = false;
@@ -150,11 +137,6 @@ function waitForSpeechVoices(timeoutMs = 2500) {
       window.speechSynthesis.removeEventListener("voiceschanged", onVoicesChanged);
 
       const voices = getSpeechVoices();
-      console.log("[VOICE] Speech voice loading finished:", {
-        reason,
-        voiceCount: voices.length,
-        waitedMs: Date.now() - startedAt
-      });
       resolve(voices);
     };
 
@@ -594,11 +576,21 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
   const cooldownUntilRef = useRef(0);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const speechQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const cancelSpeechRef = useRef<(() => void) | null>(null);
+  const pttRecognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const [supported, setSupported] = useState(true);
   const [enabled, setEnabled] = useState(false);
-  const [activated, setActivated] = useState(false);
+  const [voiceState, setVoiceState] = useState<"off" | "listening" | "thinking" | "speaking">("off");
   const [status, setStatus] = useState("Wake word off");
   const [lastTranscript, setLastTranscript] = useState("");
+
+  const stopSpeaking = useCallback(() => {
+    if (window.speechSynthesis?.speaking) {
+      window.speechSynthesis.cancel();
+    }
+    speakingRef.current = false;
+    cancelSpeechRef.current = null;
+  }, []);
 
   const pauseRecognition = useCallback((reason: string) => {
     recognitionPausedRef.current = true;
@@ -624,7 +616,6 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
 
   const speak = useCallback((text: string) => {
     if (!("speechSynthesis" in window)) {
-      console.warn("[VOICE] Speech synthesis is not supported in this browser");
       return Promise.resolve();
     }
 
@@ -635,19 +626,10 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
       const voices = await waitForSpeechVoices();
       const { selectedVoice, selectedLang } = selectSpeechVoice(speechText, voices);
       pauseRecognition("tts-start");
+      setVoiceState("speaking");
 
       return new Promise<void>((resolve) => {
-        console.log("[VOICE] TTS preparing:", {
-          textLength: speechText.length,
-          selectedLang,
-          selectedVoice: selectedVoice ? `${selectedVoice.name} (${selectedVoice.lang})` : null,
-          pending: window.speechSynthesis.pending,
-          speaking: window.speechSynthesis.speaking,
-          paused: window.speechSynthesis.paused
-        });
-
         if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
-          console.log("[VOICE] TTS clearing existing browser queue before speaking");
           window.speechSynthesis.cancel();
         }
 
@@ -660,62 +642,29 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
         speakingRef.current = true;
 
         let settled = false;
-        const timeoutMs = Math.min(Math.max(speechText.length * 90, 5000), 30000);
-        const finish = (eventName: string, event?: SpeechSynthesisEvent | SpeechSynthesisErrorEvent) => {
+        const finish = () => {
           if (settled) return;
           settled = true;
           window.clearTimeout(timeoutId);
           speakingRef.current = false;
+          cancelSpeechRef.current = null;
           if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-          console.log(`[VOICE] TTS ${eventName}:`, {
-            lang: utterance.lang,
-            voice: utterance.voice ? `${utterance.voice.name} (${utterance.voice.lang})` : null,
-            elapsedTime: event?.elapsedTime ?? null,
-            charIndex: event?.charIndex ?? null,
-            browserState: {
-              pending: window.speechSynthesis.pending,
-              speaking: window.speechSynthesis.speaking,
-              paused: window.speechSynthesis.paused
-            }
-          });
           resolve();
         };
 
-      const timeoutId = window.setTimeout(() => {
-  console.warn("[VOICE] TTS timeout reached:", {
-    timeoutMs,
-    textLength: speechText.length,
-    lang: utterance.lang
-  });
+        const timeoutId = window.setTimeout(() => {
+          finish();
+        }, 60000);
 
-  finish("timeout");
-}, 60000); // 60 seconds
+        cancelSpeechRef.current = () => {
+          if (!settled) {
+            window.speechSynthesis.cancel();
+            finish();
+          }
+        };
 
-        utterance.onstart = (event) => {
-          console.log("[VOICE] TTS start:", {
-            lang: utterance.lang,
-            voice: utterance.voice ? `${utterance.voice.name} (${utterance.voice.lang})` : null,
-            elapsedTime: event.elapsedTime,
-            charIndex: event.charIndex
-          });
-        };
-        utterance.onend = (event) => {
-          finish("end", event);
-        };
-        utterance.onerror = (event) => {
-          console.error("[VOICE] TTS error:", {
-            event: describeSpeechError(event),
-            lang: utterance.lang,
-            voice: utterance.voice ? `${utterance.voice.name} (${utterance.voice.lang})` : null,
-            textLength: speechText.length,
-            browserState: {
-              pending: window.speechSynthesis.pending,
-              speaking: window.speechSynthesis.speaking,
-              paused: window.speechSynthesis.paused
-            }
-          });
-          finish("error", event);
-        };
+        utterance.onend = () => finish();
+        utterance.onerror = () => finish();
         window.speechSynthesis.speak(utterance);
       });
     };
@@ -748,24 +697,31 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
   const processCommand = useCallback(async (command: string) => {
     const cleaned = command.trim();
     if (!cleaned) return;
-    console.log("[VOICE] Detected input language:", detectVoiceLanguage(cleaned));
-
+    stopSpeaking();
     pauseRecognition("processing-command");
+    setVoiceState("thinking");
     setStatus("Thinking...");
     const response = await onSendMessage(cleaned);
     if (response) {
+      setVoiceState("speaking");
       setStatus("Speaking...");
       await speak(response);
     }
     recognitionPausedRef.current = false;
+    setVoiceState("listening");
     setStatus("Listening for your command...");
     restartListening();
-  }, [onSendMessage, pauseRecognition, restartListening, speak]);
+  }, [onSendMessage, pauseRecognition, restartListening, speak, stopSpeaking]);
 
   const handleTranscript = useCallback(async (transcript: string) => {
     const cleaned = transcript.trim();
     const normalized = cleaned.toLowerCase();
     setLastTranscript(cleaned);
+
+    if (speakingRef.current && activatedRef.current) {
+      stopSpeaking();
+      pauseRecognition("interrupted");
+    }
 
     if (!activatedRef.current) {
       const wakeLower = wakeWord.toLowerCase();
@@ -773,7 +729,8 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
 
       cooldownUntilRef.current = Date.now() + 3500;
       activatedRef.current = true;
-      setActivated(true);
+      activatedRef.current = true;
+      setVoiceState("speaking");
       setStatus("Activated");
       pauseRecognition("wake-word");
       await speak(`${wakeWord}, how can I help you today?`);
@@ -784,6 +741,7 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
         await processCommand(commandAfterWake);
       } else {
         recognitionPausedRef.current = false;
+        setVoiceState("listening");
         setStatus("Listening for your command...");
         restartListening();
       }
@@ -792,7 +750,7 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
 
     pauseRecognition("command-captured");
     await processCommand(cleaned);
-  }, [pauseRecognition, processCommand, restartListening, speak, wakeWord]);
+  }, [pauseRecognition, processCommand, restartListening, speak, wakeWord, stopSpeaking]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -810,10 +768,6 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
     recognition.lang = "en-IN";
     recognition.onresult = (event) => {
       if (recognitionPausedRef.current || speakingRef.current) {
-        console.log("[VOICE] Recognition result ignored while paused/speaking:", {
-          pausedForSpeech: recognitionPausedRef.current,
-          speaking: speakingRef.current
-        });
         return;
       }
 
@@ -883,7 +837,6 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
   const toggleListening = async () => {
     if (enabled) {
       setEnabled(false);
-      setActivated(false);
       activatedRef.current = false;
       recognitionPausedRef.current = false;
       speakingRef.current = false;
@@ -891,8 +844,8 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
         clearTimeout(restartTimerRef.current);
         restartTimerRef.current = null;
       }
+      setVoiceState("off");
       setStatus("Wake word off");
-      console.log("[VOICE] Voice mode stopped; cancelling recognition and speech");
       window.speechSynthesis?.cancel();
       recognitionRef.current?.stop();
       return;
@@ -900,20 +853,87 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
 
     setSupported(true);
     setEnabled(true);
+    setVoiceState("listening");
     setStatus(`Listening for "${wakeWord}"...`);
   };
 
+  const handlePushToTalk = useCallback(() => {
+    stopSpeaking();
+    if (!("webkitSpeechRecognition" in window || "SpeechRecognition" in window)) return;
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) return;
+    const recognition = new Recognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = "en-IN";
+    let finalTranscript = "";
+    recognition.onresult = (event) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) finalTranscript += result[0].transcript;
+      }
+      if (finalTranscript) setLastTranscript(finalTranscript);
+    };
+    recognition.onend = () => {
+      if (finalTranscript) {
+        setVoiceState("thinking");
+        setStatus("Thinking...");
+        processCommand(finalTranscript);
+      }
+    };
+    pttRecognitionRef.current = recognition;
+    setVoiceState("listening");
+    setStatus("Push to talk...");
+    recognition.start();
+  }, [stopSpeaking, processCommand]);
+
+  const releasePushToTalk = useCallback(() => {
+    if (pttRecognitionRef.current) {
+      pttRecognitionRef.current.stop();
+      pttRecognitionRef.current = null;
+    }
+  }, []);
+
   return (
     <div className="mt-5 w-full max-w-xl rounded-lg border border-cyan-electric/14 bg-black/28 p-3 text-left">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-2">
         <Button type="button" size="sm" variant={enabled ? "secondary" : "primary"} onClick={toggleListening}>
           <Mic className="size-4" />
           {enabled ? "Stop Voice" : "Start Voice"}
         </Button>
-        <span className={cn("text-xs", activated ? "text-mint" : enabled ? "text-cyan-soft" : "text-muted-foreground")}>{status}</span>
+        {enabled && (
+          <button
+            type="button"
+            onMouseDown={handlePushToTalk}
+            onMouseUp={releasePushToTalk}
+            onMouseLeave={releasePushToTalk}
+            onTouchStart={handlePushToTalk}
+            onTouchEnd={releasePushToTalk}
+            className="flex items-center gap-1.5 rounded-md border border-cyan-electric/30 bg-cyan-electric/12 px-3 py-1.5 text-xs font-medium text-cyan-soft transition active:scale-95 hover:bg-cyan-electric/20 select-none"
+          >
+            <span className="relative flex size-3">
+              {voiceState === "listening" && (
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-electric/60" />
+              )}
+              <span className="relative inline-flex size-3 rounded-full bg-cyan-electric" />
+            </span>
+            Hold to Talk
+          </button>
+        )}
+        <span className={cn(
+          "flex items-center gap-1.5 text-xs",
+          voiceState === "speaking" ? "text-mint" :
+          voiceState === "thinking" ? "text-amber" :
+          voiceState === "listening" ? "text-cyan-soft" :
+          "text-muted-foreground"
+        )}>
+          {voiceState === "speaking" && <span className="inline-flex gap-0.5"><span className="size-1 animate-bounce rounded-full bg-mint [animation-delay:0ms]" /><span className="size-1 animate-bounce rounded-full bg-mint [animation-delay:150ms]" /><span className="size-1 animate-bounce rounded-full bg-mint [animation-delay:300ms]" /></span>}
+          {voiceState === "thinking" && <span className="inline-flex gap-0.5"><span className="size-1 animate-pulse rounded-full bg-amber" /><span className="size-1 animate-pulse rounded-full bg-amber [animation-delay:200ms]" /><span className="size-1 animate-pulse rounded-full bg-amber [animation-delay:400ms]" /></span>}
+          {status}
+        </span>
       </div>
       <p className="mt-2 min-h-5 truncate text-xs text-muted-foreground">
-        {supported ? lastTranscript || `Say "${wakeWord}" to activate hands-free mode.` : "Use Chrome or Edge for speech recognition."}
+        {supported ? lastTranscript || (enabled ? `Say "${wakeWord}" to activate.` : "Use Chrome or Edge for speech recognition.") : "Use Chrome or Edge for speech recognition."}
       </p>
     </div>
   );
