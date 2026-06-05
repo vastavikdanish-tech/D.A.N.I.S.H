@@ -1084,6 +1084,8 @@ function RemoteControl({ authFetch }: { authFetch: (input: RequestInfo, init?: R
   const [loading, setLoading] = useState(true);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
+  const [pairingToken, setPairingToken] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
 
   const loadDevices = useCallback(async () => {
     try {
@@ -1131,6 +1133,27 @@ function RemoteControl({ authFetch }: { authFetch: (input: RequestInfo, init?: R
       });
       loadDevices();
     } catch { /* ignore */ }
+  }
+
+  async function generatePairingToken() {
+    setGenerating(true);
+    setActionStatus(null);
+    try {
+      const res = await authFetch("/api/devices/pairing-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const json = await res.json();
+      if (json?.ok) {
+        setPairingToken(json.token);
+      } else {
+        setActionStatus(json?.error || "Failed to generate token.");
+      }
+    } catch {
+      setActionStatus("Unable to generate token.");
+    } finally {
+      setGenerating(false);
+    }
   }
 
   const onlineDevices = devices.filter((d) => d.health?.status === "online");
@@ -1184,16 +1207,40 @@ function RemoteControl({ authFetch }: { authFetch: (input: RequestInfo, init?: R
             </div>
           ))}
 
-          {/* No devices state */}
-          {devices.length === 0 && (
-            <div className="mb-4 rounded-lg border border-cyan-electric/14 bg-black/35 p-4 text-center">
-              <Laptop className="mx-auto mb-2 size-8 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">No devices connected.</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Run <code className="rounded bg-white/10 px-1 py-0.5 text-xs">.\agents\windows-agent.ps1 -ServerUrl $env:PUBLIC_URL</code> on your PC to connect.
-              </p>
-            </div>
-          )}
+          {/* Add Device / Pairing Token Generator */}
+          <div className="mb-4 rounded-lg border border-cyan-electric/14 bg-black/35 p-4">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">ADD DEVICE</p>
+            {pairingToken ? (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">Run this command on your Windows PC:</p>
+                <div className="rounded-md bg-black/40 p-2">
+                  {(() => {
+                    const origin = typeof window !== "undefined" ? window.location.origin : "https://your-server.com";
+                    const cmd = `.\\windows-agent.ps1 -ServerUrl "${origin}" -PairingToken "${pairingToken}" -DeviceName "$env:COMPUTERNAME"`;
+                    return <code className="block break-all text-xs text-cyan-soft">{cmd}</code>;
+                  })()}
+                </div>
+                {(() => {
+                  const origin = typeof window !== "undefined" ? window.location.origin : "https://your-server.com";
+                  const cmd = `.\\windows-agent.ps1 -ServerUrl "${origin}" -PairingToken "${pairingToken}" -DeviceName "$env:COMPUTERNAME"`;
+                  return (
+                    <>
+                      <Button size="sm" variant="ghost" onClick={() => { navigator.clipboard.writeText(cmd); setActionStatus("Copied!"); }}>
+                        Copy Command
+                      </Button>
+                      <Button size="sm" variant="secondary" onClick={() => { setPairingToken(null); generatePairingToken(); }}>
+                        Regenerate
+                      </Button>
+                    </>
+                  );
+                })()}
+              </div>
+            ) : (
+              <Button size="sm" variant="secondary" disabled={generating} onClick={generatePairingToken}>
+                {generating ? "Generating..." : "Generate Pairing Token"}
+              </Button>
+            )}
+          </div>
 
           {/* Quick Actions */}
           <div className="mt-4 rounded-lg border border-cyan-electric/14 bg-black/35 p-3">

@@ -5,10 +5,13 @@ registers as a device, sends heartbeats, polls for commands,
 and executes Windows actions.
 
 .SYNOPSIS
-.\windows-agent.ps1 -ServerUrl "https://your-server.com" -DeviceName "My PC"
+.\windows-agent.ps1 -ServerUrl "https://your-server.com" -PairingToken "TOKEN" -DeviceName "My PC"
 
 .PARAMETER ServerUrl
 Base URL of the D.A.N.I.S.H server.
+
+.PARAMETER PairingToken
+Required for first run. Generate from Dashboard → Remote Control → Add Device.
 
 .PARAMETER DeviceName
 Display name for this device.
@@ -22,6 +25,7 @@ Seconds between command polls. Default: 5
 
 param(
   [Parameter(Mandatory = $true)] [string]$ServerUrl,
+  [Parameter(Mandatory = $false)] [string]$PairingToken = "",
   [Parameter(Mandatory = $false)] [string]$DeviceName = $env:COMPUTERNAME,
   [Parameter(Mandatory = $false)] [string]$DeviceKey = "",
   [Parameter(Mandatory = $false)] [int]$PollInterval = 5
@@ -78,13 +82,20 @@ function Invoke-Api {
 }
 
 function Register-Device {
-  param([string]$name)
+  param([string]$name, [string]$pairingToken)
 
   Write-Log "Registering device '$name' with server..."
-  $result = Invoke-Api -Method "POST" -Endpoint "/api/devices/register" -Body @{
+
+  $body = @{
     name = $name
     device_type = "laptop"
   }
+  if ($pairingToken) {
+    $body.pairing_token = $pairingToken
+    Write-Log "Using pairing token for authentication."
+  }
+
+  $result = Invoke-Api -Method "POST" -Endpoint "/api/devices/register" -Body $body
 
   if ($result -and $result.ok) {
     Write-Log "Device registered! ID: $($result.data.id)"
@@ -230,7 +241,13 @@ if (-not $config) {
     Write-Log "DeviceKey provided but no config found. Run without -DeviceKey to register."
     exit 1
   }
-  $config = Register-Device -name $DeviceName
+  if (-not $PairingToken) {
+    Write-Log "ERROR: -PairingToken is required for first-time registration."
+    Write-Log "Generate a token from Dashboard → Remote Control → Add Device."
+    Write-Log "Then run: .\windows-agent.ps1 -ServerUrl '$ServerUrl' -PairingToken '<token>' -DeviceName '$DeviceName'"
+    exit 1
+  }
+  $config = Register-Device -name $DeviceName -pairingToken $PairingToken
   if (-not $config) {
     Write-Log "Registration failed. Exiting."
     exit 1
