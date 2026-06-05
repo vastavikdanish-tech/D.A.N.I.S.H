@@ -8,5 +8,6 @@ coverage
 *.log
 voice-svc-*.txt
 __pycache__/
+tsconfig.tsbuildinfo
 agents/.agent-config.json
 agents/.android-agent-config.json
