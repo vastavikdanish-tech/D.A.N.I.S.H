@@ -358,6 +358,7 @@ export function CommandCenter() {
           </div>
         </section>
         <section className="space-y-4">
+          <ProactiveBriefing authFetch={authFetch} />
           <ProfileSummary profile={profile} />
           <ProfileSettings />
           <MemoryVault authFetch={authFetch} />
@@ -443,6 +444,90 @@ function MobileSectionNav() {
         </a>
       ))}
     </nav>
+  );
+}
+
+type BriefingData = {
+  greeting: string;
+  reminders: number;
+  upNext: { id: string; title: string; due_at: string }[];
+  goals: { title: string; progress: number }[];
+  devicesOnline: number;
+  devicesTotal: number;
+};
+
+function ProactiveBriefing({ authFetch }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response> }) {
+  const [briefing, setBriefing] = useState<BriefingData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await authFetch("/api/briefing");
+        const json = await res.json();
+        if (json?.ok) setBriefing(json.data);
+      } catch { /* ignore */ }
+      setLoading(false);
+    })();
+  }, [authFetch]);
+
+  if (loading || !briefing) return null;
+
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+
+  return (
+    <Card id="briefing" className="bg-gradient-to-br from-mint/5 via-transparent to-cyan/5">
+      <CardHeader>
+        <CardTitle>{briefing.greeting}</CardTitle>
+        <span className="text-xs text-muted-foreground">{dateStr}</span>
+      </CardHeader>
+      <div className="space-y-2 px-3 pb-3">
+        <div className="flex gap-3">
+          <div className="flex-1 rounded-md bg-black/20 px-3 py-2 text-center">
+            <p className="text-lg font-semibold text-mint">{briefing.reminders}</p>
+            <p className="text-[10px] text-muted-foreground">Reminders</p>
+          </div>
+          <div className="flex-1 rounded-md bg-black/20 px-3 py-2 text-center">
+            <p className="text-lg font-semibold text-cyan-soft">{briefing.devicesOnline}/{briefing.devicesTotal}</p>
+            <p className="text-[10px] text-muted-foreground">Devices</p>
+          </div>
+          <div className="flex-1 rounded-md bg-black/20 px-3 py-2 text-center">
+            <p className="text-lg font-semibold text-amber">{briefing.goals.length}</p>
+            <p className="text-[10px] text-muted-foreground">Goals</p>
+          </div>
+        </div>
+
+        {briefing.upNext.length > 0 && (
+          <div className="rounded-md bg-black/20 px-3 py-2">
+            <p className="mb-1 text-[10px] font-medium text-muted-foreground">UP NEXT</p>
+            {briefing.upNext.map((r) => (
+              <div key={r.id} className="flex items-center gap-2 py-0.5">
+                <span className="size-1.5 rounded-full bg-mint" />
+                <span className="text-xs text-white">{r.title}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {briefing.goals.length > 0 && (
+          <div className="rounded-md bg-black/20 px-3 py-2">
+            <p className="mb-1 text-[10px] font-medium text-muted-foreground">GOALS</p>
+            {briefing.goals.map((g, i) => (
+              <div key={i} className="mb-1 last:mb-0">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="truncate text-white">{g.title}</span>
+                  <span className="text-muted-foreground">{g.progress}%</span>
+                </div>
+                <div className="mt-0.5 h-1 rounded-full bg-white/10">
+                  <div className="h-1 rounded-full bg-gradient-to-r from-mint to-cyan" style={{ width: `${g.progress}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
   );
 }
 
