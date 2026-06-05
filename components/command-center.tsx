@@ -37,6 +37,17 @@ const ModuleHealth = dynamic(() => import("@/components/module-health").then(m =
 export function CommandCenter() {
   const { getAccessToken, user } = useAuth();
   const [messages, setMessages] = useState<Array<{ role: string; text: string }>>([]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("danish_messages");
+    if (saved) {
+      try { setMessages(JSON.parse(saved)); } catch { /* ignore */ }
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("danish_messages", JSON.stringify(messages.slice(-50)));
+  }, [messages]);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [wakeWord, setWakeWord] = useState<string>("Hello Danish");
 

@@ -451,6 +451,69 @@ export class TTSProvider {
   }
 }
 
+// ---------- STTProvider: Android Bridge ----------
+
+declare global {
+  interface Window {
+    AndroidBridge?: {
+      isOnline: () => boolean;
+      getAppVersion: () => string;
+      getPlatform: () => string;
+      hasMicPermission: () => boolean;
+      hasNotificationPermission: () => boolean;
+      startVoiceInput: (callbackId: string) => void;
+      stopVoiceInput: () => void;
+      speak: (text: string, callbackId: string) => void;
+      stopSpeaking: () => void;
+    };
+  }
+}
+
+export class AndroidSTTProvider implements STTProvider {
+  private _isRunning = false;
+  private bridge: NonNullable<Window["AndroidBridge"]>;
+  private onResultCb: ((h: STTHypothesis) => void) | null = null;
+  private onEndCb: (() => void) | null = null;
+
+  constructor() {
+    this.bridge = window.AndroidBridge!;
+  }
+
+  get isRunning() {
+    return this._isRunning;
+  }
+
+  start(onResult: (h: STTHypothesis) => void, onEnd?: () => void) {
+    this.stop();
+    this.onResultCb = onResult;
+    this.onEndCb = onEnd ?? null;
+    this._isRunning = true;
+
+    try {
+      this.bridge.startVoiceInput("danish_stt_" + Date.now());
+    } catch {
+      this._isRunning = false;
+    }
+  }
+
+  setTranscript(text: string) {
+    if (!this._isRunning) return;
+    this.onResultCb?.({ text, isFinal: true });
+    this._isRunning = false;
+    this.onEndCb?.();
+  }
+
+  stop() {
+    this._isRunning = false;
+    try { this.bridge.stopVoiceInput(); } catch { /* ignore */ }
+  }
+
+  abort() {
+    this._isRunning = false;
+    try { this.bridge.stopVoiceInput(); } catch { /* ignore */ }
+  }
+}
+
 // ---------- STTProvider: Browser ----------
 
 export class BrowserSTTProvider implements STTProvider {
@@ -529,17 +592,28 @@ export class VoiceEngine {
   private _wakeWord: string = "";
   private _wakeCallback: ((text: string) => void) | null = null;
   private _wakeActive = false;
+  private _isAndroid = false;
 
   get voiceServiceOnline() {
     return this._voiceServiceOnline;
   }
 
+  get isAndroid() {
+    return this._isAndroid;
+  }
+
   constructor() {
+    this._isAndroid = typeof window !== "undefined" && !!window.AndroidBridge;
     this.audio = new AudioController();
     this.detector = new SpeechDetector();
     this.state = new VoiceStateMachine();
     this.tts = new TTSProvider();
-    this.stt = new BrowserSTTProvider();
+    this.stt = this._isAndroid ? new AndroidSTTProvider() : new BrowserSTTProvider();
+    if (this._isAndroid) {
+      this.audio.onAllEnded(() => {
+        if (this.state.state === "speaking") this.state.transition("listening");
+      });
+    }
     this.startHealthChecks();
   }
 

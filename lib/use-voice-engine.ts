@@ -7,6 +7,7 @@ export function useVoiceEngine() {
   const [voiceServiceOnline, setVoiceServiceOnline] = useState(false);
   const stateRef = useRef<VoiceState>("off");
   const onTranscriptRef = useRef<(text: string) => void>(() => {});
+  const wakeWordSetRef = useRef(false);
 
   useEffect(() => {
     const engine = new VoiceEngine();
@@ -53,7 +54,11 @@ export function useVoiceEngine() {
       await engine.speakStream(s).catch(() => engine.speakBrowser(s));
     }
     if (stateRef.current === "speaking") {
-      engine.state.transition("listening");
+      if (wakeWordSetRef.current) {
+        engine.startWakeWordDetection();
+      } else {
+        engine.state.transition("listening");
+      }
     }
   }, []);
 
@@ -114,6 +119,8 @@ export function useVoiceEngine() {
       const engine = engineRef.current;
       if (!engine) return;
       engine.stopWakeWordDetection();
+      if (!wakeWord) { wakeWordSetRef.current = false; return; }
+      wakeWordSetRef.current = true;
       engine.setWakeWord(wakeWord, (text) => onTranscriptRef.current(text));
       engine.startWakeWordDetection();
     },
