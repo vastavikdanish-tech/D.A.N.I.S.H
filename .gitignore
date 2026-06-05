@@ -9,5 +9,15 @@ coverage
 voice-svc-*.txt
 __pycache__/
 tsconfig.tsbuildinfo
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/.idea/
+android/local.properties
+android/captures/
+android/.externalNativeBuild/
+android/google-services.json
 agents/.agent-config.json
 agents/.android-agent-config.json

@@ -18,6 +18,8 @@ import { ProfileSettings } from "@/components/profile-settings";
 import { Onboarding } from "@/components/onboarding";
 import { AppShell } from "@/components/app-shell";
 import { useVoiceEngine } from "@/lib/use-voice-engine";
+import { usePwa } from "@/lib/use-pwa";
+import { PwaInstallPrompt } from "@/components/pwa/install-prompt";
 
 export type BriefingData = {
   greeting: string;
@@ -84,10 +86,9 @@ export function CommandCenter() {
     if (Notification.permission === "default") {
       Notification.requestPermission();
     }
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
-    }
   }, []);
+
+  usePwa();
 
   useEffect(() => {
     if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") return;
@@ -229,6 +230,7 @@ export function CommandCenter() {
   return (
     <>
       <Onboarding isOpen={showOnboarding} onComplete={handleOnboardingComplete} />
+      <PwaInstallPrompt />
       <AppShell
       orbState={voice.state}
       onCommand={submitAssistant}

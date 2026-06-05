@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">D.A.N.I.S.H</string>
+    <string name="app_description">Dynamic AI Network for Intelligence, Systems &amp; Help</string>
+    <string name="webview_home_url">https://d-a-n-i-s-h.vercel.app/dashboard</string>
+    <string name="notification_channel_alerts">D.A.N.I.S.H Alerts</string>
+    <string name="notification_channel_reminders">Reminders</string>
+    <string name="notification_channel_device">Device Commands</string>
+    <string name="offline_message">No internet connection. Some features may be unavailable.</string>
+    <string name="mic_permission_rationale">Microphone access is needed for voice commands and AI conversation.</string>
+    <string name="notification_permission_rationale">Notifications keep you updated on reminders and AI responses.</string>
+</resources>
