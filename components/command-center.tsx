@@ -210,6 +210,7 @@ type UserProfile = {
   avatar_url: string | null;
   timezone: string;
   bio: string | null;
+  wake_word?: string;
   created_at: string;
   updated_at: string;
 };
@@ -220,6 +221,7 @@ export function CommandCenter() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [wakeWord, setWakeWord] = useState<string>("Hello Danish");
 
   const authFetch = useCallback(async (input: RequestInfo, init: RequestInit = {}) => {
     const headers = new Headers(init.headers ?? {});
@@ -247,6 +249,8 @@ export function CommandCenter() {
         const json = await res.json();
         if (json?.ok && json.data) {
           setProfile(json.data);
+          const storedWakeWord = typeof window !== "undefined" ? localStorage.getItem("danish_wake_word") : null;
+          setWakeWord(storedWakeWord || json.data.wake_word || "Hello Danish");
           if (!json.data.display_name) {
             setShowOnboarding(true);
           }
@@ -262,6 +266,13 @@ export function CommandCenter() {
 
   const handleOnboardingComplete = () => {
     setShowOnboarding(false);
+  };
+
+  const handleWakeWordChange = (newWakeWord: string) => {
+    setWakeWord(newWakeWord);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("danish_wake_word", newWakeWord);
+    }
   };
 
   const submitAssistant = useCallback(async (message: string, mode: string = "assistant") => {
@@ -298,11 +309,11 @@ export function CommandCenter() {
       <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)_380px]">
         <Sidebar authFetch={authFetch} />
         <section className="space-y-4">
-          <HeroCommand profile={profile} onCommand={submitAssistant} />
+          <HeroCommand profile={profile} onCommand={submitAssistant} wakeWord={wakeWord} />
           <MobileSectionNav />
           <ModuleGrid />
           <div className="grid gap-4 lg:grid-cols-[1.08fr_0.92fr]">
-            <RemoteControl authFetch={authFetch} />
+            <RemoteControl authFetch={authFetch} profile={profile} />
             <AutomationPanel authFetch={authFetch} />
           </div>
           <div className="grid gap-4 lg:grid-cols-[0.88fr_1.12fr]">
@@ -317,7 +328,7 @@ export function CommandCenter() {
         <section className="space-y-4">
           <ProfileSummary profile={profile} />
           <ProfileSettings />
-          <MobileVoice onSendMessage={submitAssistant} />
+          <MobileVoice onSendMessage={submitAssistant} profile={profile} />
           <SystemPanel authFetch={authFetch} />
           <CommandExamples onSendMessage={submitAssistant} />
           <Notifications />
@@ -427,7 +438,7 @@ function ProfileSummary({ profile }: { profile?: UserProfile | null }) {
   );
 }
 
-function HeroCommand({ profile, onCommand }: { profile?: UserProfile | null; onCommand: (msg: string) => Promise<string | null> }) {
+function HeroCommand({ profile, onCommand, wakeWord }: { profile?: UserProfile | null; onCommand: (msg: string) => Promise<string | null>; wakeWord: string }) {
   const [input, setInput] = useState("");
   const greetingName = profile?.display_name || "User";
 
@@ -484,7 +495,7 @@ function HeroCommand({ profile, onCommand }: { profile?: UserProfile | null; onC
         </p>
         <p className="mt-2 text-sm text-muted-foreground">All Systems Operational.</p>
         <VoiceCore />
-        <VoiceAssistant onSendMessage={onCommand} />
+        <VoiceAssistant onSendMessage={onCommand} wakeWord={wakeWord} />
         <p className="mt-8 text-xl text-white">What would you like me to do today?</p>
         <VoiceWave className="mt-5 w-full max-w-xl" />
       </div>
@@ -519,7 +530,7 @@ function VoiceCore() {
   );
 }
 
-function VoiceAssistant({ onSendMessage }: { onSendMessage: (msg: string) => Promise<string | null> }) {
+function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: string) => Promise<string | null>; wakeWord: string }) {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const listeningRef = useRef(false);
   const activatedRef = useRef(false);
@@ -666,7 +677,7 @@ function VoiceAssistant({ onSendMessage }: { onSendMessage: (msg: string) => Pro
       try {
         recognitionRef.current?.start();
         listeningRef.current = true;
-        setStatus(activatedRef.current ? "Listening for your command..." : "Listening for \"Hello Danish\"...");
+        setStatus(activatedRef.current ? "Listening for your command..." : `Listening for "${wakeWord}"...`);
       } catch (error) {
         console.warn("[VOICE] Recognition start failed:", {
           error: error instanceof Error ? { name: error.name, message: error.message } : error,
@@ -677,7 +688,7 @@ function VoiceAssistant({ onSendMessage }: { onSendMessage: (msg: string) => Pro
         listeningRef.current = false;
       }
     }, 250);
-  }, [enabled]);
+  }, [enabled, wakeWord]);
 
   const processCommand = useCallback(async (command: string) => {
     const cleaned = command.trim();
@@ -702,16 +713,18 @@ function VoiceAssistant({ onSendMessage }: { onSendMessage: (msg: string) => Pro
     setLastTranscript(cleaned);
 
     if (!activatedRef.current) {
-      if (!normalized.includes("hello danish") || Date.now() < cooldownUntilRef.current) return;
+      const wakeLower = wakeWord.toLowerCase();
+      if (!normalized.includes(wakeLower) || Date.now() < cooldownUntilRef.current) return;
 
       cooldownUntilRef.current = Date.now() + 3500;
       activatedRef.current = true;
       setActivated(true);
       setStatus("Activated");
       pauseRecognition("wake-word");
-      await speak("Hello Danish, how can I help you today?");
+      await speak(`${wakeWord}, how can I help you today?`);
 
-      const commandAfterWake = cleaned.replace(/hello danish/i, "").trim();
+      const wakePattern = wakeWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const commandAfterWake = cleaned.replace(new RegExp(wakePattern, "i"), "").trim();
       if (commandAfterWake) {
         await processCommand(commandAfterWake);
       } else {
@@ -724,7 +737,7 @@ function VoiceAssistant({ onSendMessage }: { onSendMessage: (msg: string) => Pro
 
     pauseRecognition("command-captured");
     await processCommand(cleaned);
-  }, [pauseRecognition, processCommand, restartListening, speak]);
+  }, [pauseRecognition, processCommand, restartListening, speak, wakeWord]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -832,7 +845,7 @@ function VoiceAssistant({ onSendMessage }: { onSendMessage: (msg: string) => Pro
 
     setSupported(true);
     setEnabled(true);
-    setStatus("Listening for \"Hello Danish\"...");
+    setStatus(`Listening for "${wakeWord}"...`);
   };
 
   return (
@@ -845,7 +858,7 @@ function VoiceAssistant({ onSendMessage }: { onSendMessage: (msg: string) => Pro
         <span className={cn("text-xs", activated ? "text-mint" : enabled ? "text-cyan-soft" : "text-muted-foreground")}>{status}</span>
       </div>
       <p className="mt-2 min-h-5 truncate text-xs text-muted-foreground">
-        {supported ? lastTranscript || "Say \"Hello Danish\" to activate hands-free mode." : "Use Chrome or Edge for speech recognition."}
+        {supported ? lastTranscript || `Say "${wakeWord}" to activate hands-free mode.` : "Use Chrome or Edge for speech recognition."}
       </p>
     </div>
   );
@@ -891,7 +904,7 @@ function ModuleGrid() {
   );
 }
 
-function RemoteControl({ authFetch }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response> }) {
+function RemoteControl({ authFetch, profile }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response>; profile?: UserProfile | null }) {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -931,7 +944,7 @@ function RemoteControl({ authFetch }: { authFetch: (input: RequestInfo, init?: R
           <Laptop className="size-5" />
         </div>
         <div>
-          <p className="font-medium text-white">Danish&apos;s Laptop</p>
+          <p className="font-medium text-white">{profile?.display_name || "User"}&apos;s Laptop</p>
           <p className="text-xs text-muted-foreground">Windows 11 Pro</p>
         </div>
       </div>
@@ -1478,7 +1491,7 @@ function StudyAndCareer() {
   );
 }
 
-function MobileVoice({ onSendMessage }: { onSendMessage: (msg: string) => Promise<string | null> }) {
+function MobileVoice({ onSendMessage, profile }: { onSendMessage: (msg: string) => Promise<string | null>; profile?: UserProfile | null }) {
   return (
     <Card className="overflow-hidden p-5">
       <div className="mb-4 flex items-center justify-between">
@@ -1495,7 +1508,7 @@ function MobileVoice({ onSendMessage }: { onSendMessage: (msg: string) => Promis
       <div className="mx-auto mt-6 grid size-40 place-items-center rounded-full border border-cyan-electric/25 bg-cyan-electric/8 shadow-glow">
         <VoiceCoreMini />
       </div>
-      <p className="mt-5 text-center text-lg text-white">Good Evening, <span className="text-cyan-soft">Danish.</span></p>
+      <p className="mt-5 text-center text-lg text-white">Good Evening, <span className="text-cyan-soft">{profile?.display_name || "User"}.</span></p>
       <p className="text-center text-sm text-muted-foreground">What can I help you with?</p>
       <VoiceWave className="mx-auto mt-2 max-w-[260px]" />
       <Button
