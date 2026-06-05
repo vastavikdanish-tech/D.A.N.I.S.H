@@ -15,7 +15,7 @@ export async function executeAction(command: string, ctx: ActionContext): Promis
     const section = parseNavigateTarget(lower);
     if (section) {
       ctx.navigate?.(section);
-      return { handled: true, message: `Navigated to ${section.replace(/-/g, " ")}.` };
+      return { handled: true, message: `Opening ${section.replace(/-/g, " ")}.` };
     }
   }
 
@@ -34,12 +34,17 @@ const navigateActions: Record<string, string> = {
   "open dashboard": "dashboard",
   "go to dashboard": "dashboard",
   "show dashboard": "dashboard",
+  "take me to dashboard": "dashboard",
+  "navigate to dashboard": "dashboard",
   "open settings": "profile",
   "go to settings": "profile",
   "show settings": "profile",
+  "take me to settings": "profile",
+  "navigate to settings": "profile",
   "open profile": "profile-settings",
   "go to profile": "profile-settings",
   "show profile": "profile-settings",
+  "take me to profile": "profile-settings",
   "open assistant": "assistant",
   "go to assistant": "assistant",
   "show assistant": "assistant",
@@ -57,64 +62,147 @@ const navigateActions: Record<string, string> = {
 };
 
 function isNavigateCommand(lower: string): boolean {
-  return Object.keys(navigateActions).some((key) => lower.startsWith(key) || lower === key);
+  return Object.keys(navigateActions).some((key) => lower === key || lower.startsWith(key + " "));
 }
 
 function parseNavigateTarget(lower: string): string | null {
   for (const [key, section] of Object.entries(navigateActions)) {
-    if (lower.startsWith(key) || lower === key) return section;
+    if (lower === key || lower.startsWith(key + " ")) return section;
   }
   return null;
 }
 
 function isCreateReminderCommand(lower: string): boolean {
-  return lower.startsWith("create reminder") || lower.startsWith("add reminder") || lower.startsWith("new reminder") || lower.startsWith("remind me");
+  return lower.startsWith("create reminder") ||
+    lower.startsWith("add reminder") ||
+    lower.startsWith("new reminder") ||
+    lower.startsWith("remind me") ||
+    lower.startsWith("set a reminder") ||
+    lower.startsWith("make a reminder");
+}
+
+function parseReminderTime(text: string): { title: string; remind_at?: string } {
+  const timePatterns: { re: RegExp; parse: (match: RegExpMatchArray) => Date | null }[] = [
+    {
+      re: /in\s+(\d+)\s+minutes?\b/i,
+      parse: (m) => { const d = new Date(); d.setMinutes(d.getMinutes() + parseInt(m[1])); return d; },
+    },
+    {
+      re: /in\s+(\d+)\s+hours?\b/i,
+      parse: (m) => { const d = new Date(); d.setHours(d.getHours() + parseInt(m[1])); return d; },
+    },
+    {
+      re: /in\s+(\d+)\s+days?\b/i,
+      parse: (m) => { const d = new Date(); d.setDate(d.getDate() + parseInt(m[1])); return d; },
+    },
+    {
+      re: /tomorrow\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i,
+      parse: (m) => {
+        const d = new Date();
+        d.setDate(d.getDate() + 1);
+        let h = parseInt(m[1]);
+        const min = m[2] ? parseInt(m[2]) : 0;
+        if (m[3]?.toLowerCase() === "pm" && h < 12) h += 12;
+        if (m[3]?.toLowerCase() === "am" && h === 12) h = 0;
+        d.setHours(h, min, 0, 0);
+        return d;
+      },
+    },
+    {
+      re: /tomorrow\b/i,
+      parse: () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d; },
+    },
+    {
+      re: /at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i,
+      parse: (m) => {
+        const d = new Date();
+        let h = parseInt(m[1]);
+        const min = m[2] ? parseInt(m[2]) : 0;
+        if (m[3]?.toLowerCase() === "pm" && h < 12) h += 12;
+        if (m[3]?.toLowerCase() === "am" && h === 12) h = 0;
+        if (h < d.getHours() || (h === d.getHours() && min <= d.getMinutes())) {
+          d.setDate(d.getDate() + 1);
+        }
+        d.setHours(h, min, 0, 0);
+        return d;
+      },
+    },
+  ];
+
+  for (const { re, parse } of timePatterns) {
+    const match = text.match(re);
+    if (match) {
+      const date = parse(match);
+      if (date) {
+        const title = text.replace(re, "").trim();
+        return { title, remind_at: date.toISOString() };
+      }
+    }
+  }
+
+  return { title: text };
 }
 
 async function handleCreateReminder(command: string, ctx: ActionContext): Promise<ActionResult> {
-  const title = command.replace(/^(create|add|new)\s+reminder\s*/i, "").replace(/^remind me\s*/i, "").trim() || "Untitled Reminder";
+  const cleaned = command.replace(/^(create|add|new|set|make)\s+a?\s*reminder\s*/i, "").replace(/^remind me\s*/i, "").trim();
+  if (!cleaned) {
+    return { handled: true, message: "What would you like me to remind you about?" };
+  }
+
+  const { title, remind_at } = parseReminderTime(cleaned);
+  const finalTitle = title || cleaned || "Untitled Reminder";
+
   try {
     const res = await ctx.authFetch("/api/reminders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title: finalTitle, remind_at }),
     });
     const json = await res.json();
     if (json?.ok) {
-      return { handled: true, message: `Reminder created: "${title}".` };
+      if (remind_at) {
+        return { handled: true, message: `Reminder set for ${finalTitle}.` };
+      }
+      return { handled: true, message: `Reminder created for ${finalTitle}.` };
     }
-    return { handled: true, message: `Failed to create reminder: ${json?.error || "Unknown error"}.` };
+    return { handled: true, message: `Could not create reminder: ${json?.error || "Something went wrong."}` };
   } catch {
-    return { handled: true, message: "Could not create reminder due to a network error." };
+    return { handled: true, message: "Could not create reminder. Please try again." };
   }
 }
 
 function isSaveMemoryCommand(lower: string): boolean {
-  return lower.startsWith("save memory") || lower.startsWith("remember") || lower.startsWith("add memory") || lower.startsWith("store memory");
+  const triggers = [
+    "remember", "save memory", "add memory", "store memory",
+    "remember that", "i want to remember", "note down",
+  ];
+  return triggers.some((t) => lower.startsWith(t));
 }
 
 async function handleSaveMemory(command: string, ctx: ActionContext): Promise<ActionResult> {
-  const content = command.replace(/^(save|store|add)\s+memory\s*/i, "").replace(/^remember\s*/i, "").trim();
+  const content = command
+    .replace(/^(save|store|add)\s+memory\s*/i, "")
+    .replace(/^(remember|note down)\s*(that\s*)?/i, "")
+    .replace(/^i want to remember\s*/i, "")
+    .trim();
+
   if (!content) {
     return { handled: true, message: "What would you like me to remember?" };
   }
+
   const title = content.length > 80 ? content.slice(0, 80) + "..." : content;
   try {
     const res = await ctx.authFetch("/api/memories", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title,
-        body: content,
-        category: "note",
-      }),
+      body: JSON.stringify({ title, body: content, category: "note" }),
     });
     const json = await res.json();
     if (json?.ok) {
-      return { handled: true, message: `Memory saved: "${title}".` };
+      return { handled: true, message: "I will remember that." };
     }
-    return { handled: true, message: `Failed to save memory: ${json?.error || "Unknown error"}.` };
+    return { handled: true, message: `Could not save memory: ${json?.error || "Something went wrong."}` };
   } catch {
-    return { handled: true, message: "Could not save memory due to a network error." };
+    return { handled: true, message: "Could not save memory. Please try again." };
   }
 }
