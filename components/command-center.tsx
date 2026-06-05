@@ -360,6 +360,7 @@ export function CommandCenter() {
         <section className="space-y-4">
           <ProfileSummary profile={profile} />
           <ProfileSettings />
+          <MemoryVault authFetch={authFetch} />
           <MobileVoice onSendMessage={submitAssistant} profile={profile} />
           <SystemPanel authFetch={authFetch} />
           <CommandExamples onSendMessage={submitAssistant} />
@@ -1841,6 +1842,75 @@ function Notifications() {
             <span className="text-xs text-muted-foreground">{item.time}</span>
           </div>
         ))}
+      </div>
+    </Card>
+  );
+}
+
+type MemoryFact = {
+  id: string;
+  title: string;
+  body: string;
+  category: string;
+  tags: string[];
+  created_at: string;
+};
+
+function MemoryVault({ authFetch }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response> }) {
+  const [facts, setFacts] = useState<MemoryFact[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadFacts = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await authFetch("/api/memories/facts");
+      const json = await res.json();
+      if (json?.ok) setFacts(json.data || []);
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, [authFetch]);
+
+  useEffect(() => { loadFacts(); }, [loadFacts]);
+
+  const displayed = facts.slice(0, 5);
+
+  return (
+    <Card id="memory-vault">
+      <CardHeader>
+        <CardTitle>Smart Memory</CardTitle>
+        <span className="text-xs text-muted-foreground">
+          {loading ? "..." : `${facts.length} fact${facts.length !== 1 ? "s" : ""} stored`}
+        </span>
+      </CardHeader>
+      <div className="space-y-2">
+        {loading ? (
+          <p className="px-3 pb-3 text-xs text-muted-foreground">Loading...</p>
+        ) : displayed.length === 0 ? (
+          <p className="px-3 pb-3 text-xs text-muted-foreground">
+            Say things like &ldquo;I like coffee&rdquo; or &ldquo;my name is John&rdquo; and I will remember.
+          </p>
+        ) : (
+          displayed.map((fact) => (
+            <div key={fact.id} className="flex items-start gap-2 rounded-md bg-black/20 px-3 py-2">
+              <div className="mt-0.5 grid size-6 shrink-0 place-items-center rounded bg-mint/10 text-xs text-mint">
+                {fact.category === "preference" ? "P" : "F"}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm text-white">{fact.body}</p>
+                <div className="mt-0.5 flex gap-1.5">
+                  {fact.tags?.filter((t) => t !== "fact").map((tag) => (
+                    <span key={tag} className="rounded bg-white/8 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+        {facts.length > 5 && (
+          <p className="px-3 text-xs text-muted-foreground">+{facts.length - 5} more</p>
+        )}
       </div>
     </Card>
   );

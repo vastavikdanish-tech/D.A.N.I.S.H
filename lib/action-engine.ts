@@ -27,6 +27,10 @@ export async function executeAction(command: string, ctx: ActionContext): Promis
     return handleSaveMemory(command, ctx);
   }
 
+  if (hasFactsToExtract(lower)) {
+    return handleExtractFacts(command, ctx);
+  }
+
   if (isWindowsCommand(lower)) {
     return handleWindowsCommand(command, ctx);
   }
@@ -279,4 +283,44 @@ async function handleWindowsCommand(command: string, ctx: ActionContext): Promis
   } catch {
     return { handled: true, message: "Could not send command due to network error." };
   }
+}
+
+const factPatterns = [
+  /i (?:like|love|enjoy|prefer|hate|dislike) /i,
+  /my (?:name|favorite|age|job|work|email|phone|address|birthday|goal|hobby) /i,
+  /i (?:am|work|study|live|have|want|need|wish|hope) /i,
+  /i (?:don't|do not|can't|cannot) /i,
+  /remember (?:that )?(?:i|my|we) /i,
+];
+
+function hasFactsToExtract(lower: string): boolean {
+  if (isCreateReminderCommand(lower) || isNavigateCommand(lower) || isWindowsCommand(lower)) return false;
+  return factPatterns.some((p) => p.test(lower));
+}
+
+async function handleExtractFacts(command: string, ctx: ActionContext): Promise<ActionResult> {
+  const lower = command.toLowerCase().trim();
+  const clearPrefix = lower.replace(/^(remember that |remember |save that |save )/i, "");
+  const { extractFacts } = await import("@/lib/memory-utils");
+  const facts = extractFacts(clearPrefix);
+
+  if (facts.length === 0) return { handled: true, message: "Noted." };
+
+  let saved = 0;
+  for (const fact of facts) {
+    try {
+      const res = await ctx.authFetch("/api/memories/facts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fact),
+      });
+      const json = await res.json();
+      if (json?.ok) saved++;
+    } catch { /* skip */ }
+  }
+
+  if (saved > 0) {
+    return { handled: true, message: `I'll remember that${saved > 1 ? ` (${saved} things)` : ""}.` };
+  }
+  return { handled: false, message: command };
 }
