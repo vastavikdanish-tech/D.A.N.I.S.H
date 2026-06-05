@@ -6,3 +6,5 @@ node_modules
 dist
 coverage
 *.log
+agents/.agent-config.json
+agents/.android-agent-config.json
