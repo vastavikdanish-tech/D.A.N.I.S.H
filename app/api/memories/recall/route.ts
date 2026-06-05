@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     query_embedding: embedding,
     match_threshold: 0.5,
     match_count: 10,
-    user_id_input: user.id,
+    p_user_id: user.id,
   });
 
   if (!memError && memories) {

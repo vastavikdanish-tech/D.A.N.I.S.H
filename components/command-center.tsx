@@ -8,15 +8,23 @@ import {
   CirclePower,
   Laptop,
   Mic,
-  Play,
   Smartphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { executeAction } from "@/lib/action-engine";
+import dynamic from "next/dynamic";
+import { ModuleMemory } from "@/components/module-memory";
 import { ProfileSettings } from "@/components/profile-settings";
 import { Onboarding } from "@/components/onboarding";
-import { executeAction } from "@/lib/action-engine";
+import { AppShell } from "@/components/app-shell";
+import { useVoiceEngine } from "@/lib/use-voice-engine";
+
+const ModuleAutomation = dynamic(() => import("@/components/module-automation").then(m => ({ default: m.ModuleAutomation })), { ssr: false });
+const ModuleStudy = dynamic(() => import("@/components/module-study").then(m => ({ default: m.ModuleStudy })), { ssr: false });
+const ModuleCareer = dynamic(() => import("@/components/module-career").then(m => ({ default: m.ModuleCareer })), { ssr: false });
+const ModuleHealth = dynamic(() => import("@/components/module-health").then(m => ({ default: m.ModuleHealth })), { ssr: false });
 
 type SpeechRecognitionResultLike = {
   readonly isFinal: boolean;
@@ -43,6 +51,15 @@ type SpeechRecognitionLike = EventTarget & {
 };
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
+export type BriefingData = {
+  greeting: string;
+  reminders: number;
+  upNext: { id: string; title: string; due_at: string }[];
+  goals: { title: string; progress: number }[];
+  devicesOnline: number;
+  devicesTotal: number;
+};
 
 type VoiceLanguage = "hindi" | "hinglish" | "english";
 
@@ -82,9 +99,8 @@ function waitForSpeechVoices(timeoutMs = 2500) {
 
   return new Promise<SpeechSynthesisVoice[]>((resolve) => {
     let settled = false;
-    const startedAt = Date.now();
 
-    const finish = (reason: string) => {
+    const finish = (_reason: string) => {
       if (settled) return;
       settled = true;
       window.clearInterval(pollId);
@@ -160,6 +176,9 @@ export function CommandCenter() {
   const [profileLoading, setProfileLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [wakeWord, setWakeWord] = useState<string>("Hello Danish");
+
+  type Screen = "home" | "memory" | "devices" | "reminders" | "automation" | "study" | "career" | "health" | "settings";
+  const [screen, setScreen] = useState<Screen>("home");
 
   const authFetch = useCallback(async (input: RequestInfo, init: RequestInit = {}) => {
     const headers = new Headers(init.headers ?? {});
@@ -242,6 +261,10 @@ export function CommandCenter() {
     };
   }, [authFetch]);
 
+  const voice = useVoiceEngine();
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
+
   const handleOnboardingComplete = () => {
     setShowOnboarding(false);
     const storedWakeWord = typeof window !== "undefined" ? localStorage.getItem("danish_wake_word") : null;
@@ -253,9 +276,9 @@ export function CommandCenter() {
   };
 
   const navigate = useCallback((sectionId: string) => {
-    const el = document.getElementById(sectionId);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    const screens: Screen[] = ["home", "memory", "devices", "reminders", "automation", "study", "career", "health", "settings"];
+    if (screens.includes(sectionId as Screen)) {
+      setScreen(sectionId as Screen);
     }
   }, []);
 
@@ -266,6 +289,7 @@ export function CommandCenter() {
     if (actionResult) {
       setMessages((prev) => [...prev, { role: "user", text: message }]);
       setMessages((prev) => [...prev, { role: "assistant", text: actionResult.message }]);
+      voiceRef.current.speakSentences(actionResult.message);
       return actionResult.message;
     }
 
@@ -281,6 +305,7 @@ export function CommandCenter() {
       if (json?.ok && json.data) {
         const content = json.data.content || "I processed that, but I could not produce a full response.";
         setMessages((prev) => [...prev, { role: "assistant", text: content }]);
+        voiceRef.current.speakSentences(content);
         return content;
       } else {
         const errorMessage = "Error: " + (json?.error || "Unable to reach assistant.");
@@ -295,39 +320,41 @@ export function CommandCenter() {
     }
   }, [authFetch, navigate]);
 
-  return (
-    <main id="dashboard" className="mx-auto min-h-screen w-full max-w-6xl p-3 sm:p-5">
-      <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
-        <section className="space-y-4">
-          <HeroCommand onCommand={submitAssistant} wakeWord={wakeWord} />
-          <AssistantPanel authFetch={authFetch} messages={messages} onSendMessage={submitAssistant} />
-        </section>
-        <section className="space-y-4">
-          <ProactiveBriefing authFetch={authFetch} />
-          <ProfileSummary profile={profile} />
-          <ProfileSettings />
-          <RemindersPanel authFetch={authFetch} />
-          <RemoteControl authFetch={authFetch} />
-          <MemoryVault authFetch={authFetch} />
-        </section>
-      </div>
-      <Onboarding isOpen={showOnboarding} onComplete={handleOnboardingComplete} />
-    </main>
-  );
-}
+  const handleTranscript = useCallback(async (message: string) => {
+    const navPatterns: Record<string, Screen> = {
+      "go to home": "home", "open home": "home", "navigate home": "home",
+      "go to memory": "memory", "open memory": "memory", "show memory": "memory", "navigate to memory": "memory",
+      "go to devices": "devices", "open devices": "devices", "show devices": "devices", "navigate to devices": "devices",
+      "go to reminders": "reminders", "open reminders": "reminders", "show reminders": "reminders", "navigate to reminders": "reminders",
+      "go to automation": "automation", "open automation": "automation", "show automation": "automation",
+      "go to study": "study", "open study": "study", "show study": "study",
+      "go to career": "career", "open career": "career", "show career": "career",
+      "go to health": "health", "open health": "health", "show health": "health", "navigate to health": "health",
+      "go to settings": "settings", "open settings": "settings", "show settings": "settings",
+    };
+    const lower = message.toLowerCase().trim();
+    const target = navPatterns[lower];
+    if (target) {
+      setScreen(target);
+      const labels: Record<string, string> = { home: "Home", memory: "Memory", devices: "Devices", reminders: "Reminders", automation: "Automation", study: "Study", career: "Career", health: "Health", settings: "Settings" };
+      const reply = `Navigating to ${labels[target]}.`;
+      setMessages((prev) => [...prev, { role: "user", text: message }]);
+      setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
+      voiceRef.current.speakSentences(reply);
+      return reply;
+    }
+    return submitAssistant(message);
+  }, [submitAssistant]);
 
-type BriefingData = {
-  greeting: string;
-  reminders: number;
-  upNext: { id: string; title: string; due_at: string }[];
-  goals: { title: string; progress: number }[];
-  devicesOnline: number;
-  devicesTotal: number;
-};
+  voice.setOnTranscript(handleTranscript);
 
-function ProactiveBriefing({ authFetch }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response> }) {
   const [briefing, setBriefing] = useState<BriefingData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [orbState, setOrbState] = useState<"off" | "listening" | "thinking" | "speaking">("off");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   useEffect(() => {
     (async () => {
@@ -336,127 +363,86 @@ function ProactiveBriefing({ authFetch }: { authFetch: (input: RequestInfo, init
         const json = await res.json();
         if (json?.ok) setBriefing(json.data);
       } catch { /* ignore */ }
-      setLoading(false);
     })();
   }, [authFetch]);
 
-  if (loading || !briefing) return null;
-
-  const now = new Date();
-  const dateStr = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  const handleMicToggle = useCallback(() => {
+    voice.toggleListening();
+  }, [voice]);
 
   return (
-    <Card id="briefing" className="bg-gradient-to-br from-mint/5 via-transparent to-cyan/5">
-      <CardHeader>
-        <CardTitle>{briefing.greeting}</CardTitle>
-        <span className="text-xs text-muted-foreground">{dateStr}</span>
-      </CardHeader>
-      <div className="space-y-2 px-3 pb-3">
-        <div className="flex gap-3">
-          <div className="flex-1 rounded-md bg-black/20 px-3 py-2 text-center">
-            <p className="text-lg font-semibold text-mint">{briefing.reminders}</p>
-            <p className="text-[10px] text-muted-foreground">Reminders</p>
-          </div>
-          <div className="flex-1 rounded-md bg-black/20 px-3 py-2 text-center">
-            <p className="text-lg font-semibold text-cyan-soft">{briefing.devicesOnline}/{briefing.devicesTotal}</p>
-            <p className="text-[10px] text-muted-foreground">Devices</p>
-          </div>
-          <div className="flex-1 rounded-md bg-black/20 px-3 py-2 text-center">
-            <p className="text-lg font-semibold text-amber">{briefing.goals.length}</p>
-            <p className="text-[10px] text-muted-foreground">Goals</p>
-          </div>
-        </div>
-
-        {briefing.upNext.length > 0 && (
-          <div className="rounded-md bg-black/20 px-3 py-2">
-            <p className="mb-1 text-[10px] font-medium text-muted-foreground">UP NEXT</p>
-            {briefing.upNext.map((r) => (
-              <div key={r.id} className="flex items-center gap-2 py-0.5">
-                <span className="size-1.5 rounded-full bg-mint" />
-                <span className="text-xs text-white">{r.title}</span>
+    <>
+      <Onboarding isOpen={showOnboarding} onComplete={handleOnboardingComplete} />
+      <AppShell
+      orbState={orbState}
+      onCommand={submitAssistant}
+      wakeWord={wakeWord}
+      briefing={briefing}
+      onMicToggle={handleMicToggle}
+      currentScreen={screen}
+      onNavigate={setScreen}
+      voiceServiceOnline={voice.voiceServiceOnline}
+      renderModule={(screen) => {
+        switch (screen) {
+          case "memory": return <ModuleMemory authFetch={authFetch} />;
+          case "devices": return <RemoteControl authFetch={authFetch} />;
+          case "reminders": return <RemindersPanel authFetch={authFetch} />;
+          case "settings": return <ProfileSettings />;
+          case "automation":
+            return <ModuleAutomation authFetch={authFetch} />;
+          case "study":
+            return <ModuleStudy authFetch={authFetch} />;
+          case "career":
+            return <ModuleCareer authFetch={authFetch} />;
+          case "health":
+            return <ModuleHealth authFetch={authFetch} />;
+          default: return null;
+        }
+      }}
+    >
+      <div className="flex flex-1 flex-col">
+        <header className="flex items-center gap-2 border-b border-white/5 px-4 py-3">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const input = (e.target as HTMLFormElement).querySelector("input");
+              if (input?.value.trim()) {
+                submitAssistant(input.value.trim());
+                input.value = "";
+              }
+            }}
+            className="flex flex-1 items-center gap-2"
+          >
+            <input
+              type="text"
+              placeholder="Ask D.A.N.I.S.H..."
+              className="flex-1 bg-transparent text-sm text-white/80 outline-none placeholder:text-white/30"
+            />
+            <button type="submit" className="hidden" />
+          </form>
+          <button type="button" onClick={handleMicToggle} className="ml-auto flex items-center gap-1 text-xs text-cyan-soft hover:text-cyan-electric transition">
+            <Mic className="size-4 shrink-0" />
+            {voice.state === "listening" ? "Listening..." : voice.state === "speaking" ? "Speaking..." : voice.state === "thinking" ? "Thinking..." : "Voice"}
+          </button>
+        </header>
+        <div className="flex-1 overflow-y-auto space-y-3 px-4 py-4">
+          {messages.map((msg, i) => (
+            <div key={i} className={cn("flex gap-3", msg.role === "user" ? "justify-end" : "justify-start")}>
+              <div className={cn("max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed", msg.role === "user" ? "bg-cyan-electric/20 text-white rounded-br-md" : "bg-white/5 text-white/80 rounded-bl-md")}>
+                {msg.text}
               </div>
-            ))}
-          </div>
-        )}
-
-        {briefing.goals.length > 0 && (
-          <div className="rounded-md bg-black/20 px-3 py-2">
-            <p className="mb-1 text-[10px] font-medium text-muted-foreground">GOALS</p>
-            {briefing.goals.map((g, i) => (
-              <div key={i} className="mb-1 last:mb-0">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="truncate text-white">{g.title}</span>
-                  <span className="text-muted-foreground">{g.progress}%</span>
-                </div>
-                <div className="mt-0.5 h-1 rounded-full bg-white/10">
-                  <div className="h-1 rounded-full bg-gradient-to-r from-mint to-cyan" style={{ width: `${g.progress}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function ProfileSummary({ profile }: { profile?: UserProfile | null }) {
-  const profileName = profile?.display_name || "Authenticated user";
-  const initials = profile?.display_name ? profile.display_name.slice(0, 2).toUpperCase() : "AU";
-
-  return (
-    <Card id="profile">
-      <CardHeader>
-        <CardTitle>Profile</CardTitle>
-        <span className="text-xs text-mint">Signed in</span>
-      </CardHeader>
-      <div className="flex items-center gap-3">
-        <div className="grid size-11 shrink-0 place-items-center rounded-md border border-cyan-electric/30 bg-cyan-electric/10 text-sm font-semibold text-cyan-soft">
-          {initials}
+            </div>
+          ))}
+          <div ref={messagesEndRef} />
         </div>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium text-white">{profileName}</p>
-          <p className="truncate text-xs text-muted-foreground">{profile?.timezone || "UTC"}</p>
-        </div>
+        <VoiceAssistant onSendMessage={submitAssistant} wakeWord={wakeWord} onStateChange={setOrbState} />
       </div>
-      {profile?.bio ? (
-        <p className="mt-3 text-sm text-muted-foreground">{profile.bio}</p>
-      ) : null}
-    </Card>
+    </AppShell>
+    </>
   );
 }
 
-function HeroCommand({ onCommand, wakeWord }: { onCommand: (msg: string) => Promise<string | null>; wakeWord: string }) {
-  const [input, setInput] = useState("");
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (input.trim()) {
-      onCommand(input.trim());
-      setInput("");
-    }
-  };
-
-  return (
-    <Card className="relative overflow-hidden p-4 sm:p-6">
-      <header className="relative z-10">
-        <form onSubmit={handleSubmit} className="flex h-12 items-center gap-3 rounded-lg border border-cyan-electric/14 bg-black/30 px-4 focus-within:border-cyan-electric/40">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            className="w-full bg-transparent text-sm text-white outline-none placeholder:text-muted-foreground"
-            placeholder="Type a command or ask anything..."
-          />
-          <button type="submit" className="hidden" />
-          <Mic className="ml-auto size-4 shrink-0 text-cyan-soft" />
-        </form>
-      </header>
-      <VoiceAssistant onSendMessage={onCommand} wakeWord={wakeWord} />
-    </Card>
-  );
-}
-
-function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: string) => Promise<string | null>; wakeWord: string }) {
+function VoiceAssistant({ onSendMessage, wakeWord, onStateChange }: { onSendMessage: (msg: string) => Promise<string | null>; wakeWord: string; onStateChange?: (state: "off" | "listening" | "thinking" | "speaking") => void }) {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const listeningRef = useRef(false);
   const activatedRef = useRef(false);
@@ -472,6 +458,11 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
   const [voiceState, setVoiceState] = useState<"off" | "listening" | "thinking" | "speaking">("off");
   const [status, setStatus] = useState("Wake word off");
   const [lastTranscript, setLastTranscript] = useState("");
+
+  const updateVoiceState = useCallback((state: "off" | "listening" | "thinking" | "speaking") => {
+    setVoiceState(state);
+    onStateChange?.(state);
+  }, [onStateChange]);
 
   const stopSpeaking = useCallback(() => {
     if (window.speechSynthesis?.speaking) {
@@ -515,7 +506,7 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
       const voices = await waitForSpeechVoices();
       const { selectedVoice, selectedLang } = selectSpeechVoice(speechText, voices);
       pauseRecognition("tts-start");
-      setVoiceState("speaking");
+      updateVoiceState("speaking");
 
       return new Promise<void>((resolve) => {
         if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
@@ -588,16 +579,16 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
     if (!cleaned) return;
     stopSpeaking();
     pauseRecognition("processing-command");
-    setVoiceState("thinking");
+    updateVoiceState("thinking");
     setStatus("Thinking...");
     const response = await onSendMessage(cleaned);
     if (response) {
-      setVoiceState("speaking");
+      updateVoiceState("speaking");
       setStatus("Speaking...");
       await speak(response);
     }
     recognitionPausedRef.current = false;
-    setVoiceState("listening");
+    updateVoiceState("listening");
     setStatus("Listening for your command...");
     restartListening();
   }, [onSendMessage, pauseRecognition, restartListening, speak, stopSpeaking]);
@@ -619,7 +610,7 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
       cooldownUntilRef.current = Date.now() + 3500;
       activatedRef.current = true;
       activatedRef.current = true;
-      setVoiceState("speaking");
+      updateVoiceState("speaking");
       setStatus("Activated");
       pauseRecognition("wake-word");
       await speak(`${wakeWord}, how can I help you today?`);
@@ -630,7 +621,7 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
         await processCommand(commandAfterWake);
       } else {
         recognitionPausedRef.current = false;
-        setVoiceState("listening");
+        updateVoiceState("listening");
         setStatus("Listening for your command...");
         restartListening();
       }
@@ -733,7 +724,7 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
         clearTimeout(restartTimerRef.current);
         restartTimerRef.current = null;
       }
-      setVoiceState("off");
+      updateVoiceState("off");
       setStatus("Wake word off");
       window.speechSynthesis?.cancel();
       recognitionRef.current?.stop();
@@ -742,7 +733,7 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
 
     setSupported(true);
     setEnabled(true);
-    setVoiceState("listening");
+    updateVoiceState("listening");
     setStatus(`Listening for "${wakeWord}"...`);
   };
 
@@ -765,13 +756,13 @@ function VoiceAssistant({ onSendMessage, wakeWord }: { onSendMessage: (msg: stri
     };
     recognition.onend = () => {
       if (finalTranscript) {
-        setVoiceState("thinking");
+        updateVoiceState("thinking");
         setStatus("Thinking...");
         processCommand(finalTranscript);
       }
     };
     pttRecognitionRef.current = recognition;
-    setVoiceState("listening");
+    updateVoiceState("listening");
     setStatus("Push to talk...");
     recognition.start();
   }, [stopSpeaking, processCommand]);
@@ -845,7 +836,7 @@ type DeviceCommandEntry = {
   result?: Record<string, unknown> | null;
 };
 
-function RemoteControl({ authFetch }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response> }) {
+const RemoteControl = React.memo(function RemoteControl({ authFetch }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response> }) {
   const [devices, setDevices] = useState<DeviceEntry[]>([]);
   const [commands, setCommands] = useState<DeviceCommandEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1063,52 +1054,11 @@ function RemoteControl({ authFetch }: { authFetch: (input: RequestInfo, init?: R
       )}
     </Card>
   );
-}
+});
 
-function AssistantPanel({ messages, onSendMessage }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response>; messages: Array<{role: string; text: string}>; onSendMessage: (msg: string) => Promise<string | null> }) {
-  const [input, setInput] = useState("");
 
-  const handleSend = () => {
-    if (input.trim()) {
-      onSendMessage(input.trim());
-      setInput("");
-    }
-  };
 
-  return (
-    <Card id="assistant" className="min-h-[360px]">
-      <CardHeader>
-        <CardTitle>AI Assistant</CardTitle>
-        <span className="text-xs text-mint">Context aware</span>
-      </CardHeader>
-      <div className="max-h-[300px] space-y-3 overflow-y-auto pr-1">
-        {messages.length === 0 ? (
-          <p className="text-center text-sm text-muted-foreground">No messages yet. Ask D.A.N.I.S.H anything.</p>
-        ) : (
-          messages.map((m, idx) => (
-            <div key={idx} className={`${m.role === "assistant" ? "ml-auto max-w-[82%] rounded-lg border border-cyan-electric/18 bg-cyan-electric/10 p-3 text-sm text-white" : "max-w-[90%] rounded-lg border border-mint/18 bg-black/24 p-3 text-sm leading-6 text-muted-foreground"}`}>
-              {m.text}
-            </div>
-          ))
-        )}
-      </div>
-      <div className="mt-5 flex items-center gap-2 rounded-lg border border-cyan-electric/14 bg-black/30 p-2">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSend()}
-          className="min-w-0 flex-1 bg-transparent px-2 text-sm outline-none placeholder:text-muted-foreground"
-          placeholder="Ask anything..."
-        />
-        <Button size="icon" onClick={handleSend}>
-          <Play className="size-4 fill-current" />
-        </Button>
-      </div>
-    </Card>
-  );
-}
-
-function RemindersPanel({ authFetch }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response> }) {
+const RemindersPanel = React.memo(function RemindersPanel({ authFetch }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response> }) {
   type Reminder = {
     id: string;
     title: string;
@@ -1281,74 +1231,6 @@ function RemindersPanel({ authFetch }: { authFetch: (input: RequestInfo, init?: 
       </div>
     </Card>
   );
-}
+});
 
-type MemoryFact = {
-  id: string;
-  title: string;
-  body: string;
-  category: string;
-  tags: string[];
-  created_at: string;
-};
-
-function MemoryVault({ authFetch }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response> }) {
-  const [facts, setFacts] = useState<MemoryFact[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const loadFacts = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await authFetch("/api/memories/facts");
-      const json = await res.json();
-      if (json?.ok) setFacts(json.data || []);
-    } catch { /* ignore */ }
-    setLoading(false);
-  }, [authFetch]);
-
-  useEffect(() => { loadFacts(); }, [loadFacts]);
-
-  const displayed = facts.slice(0, 5);
-
-  return (
-    <Card id="memory-vault">
-      <CardHeader>
-        <CardTitle>Smart Memory</CardTitle>
-        <span className="text-xs text-muted-foreground">
-          {loading ? "..." : `${facts.length} fact${facts.length !== 1 ? "s" : ""} stored`}
-        </span>
-      </CardHeader>
-      <div className="space-y-2">
-        {loading ? (
-          <p className="px-3 pb-3 text-xs text-muted-foreground">Loading...</p>
-        ) : displayed.length === 0 ? (
-          <p className="px-3 pb-3 text-xs text-muted-foreground">
-            Say things like &ldquo;I like coffee&rdquo; or &ldquo;my name is John&rdquo; and I will remember.
-          </p>
-        ) : (
-          displayed.map((fact) => (
-            <div key={fact.id} className="flex items-start gap-2 rounded-md bg-black/20 px-3 py-2">
-              <div className="mt-0.5 grid size-6 shrink-0 place-items-center rounded bg-mint/10 text-xs text-mint">
-                {fact.category === "preference" ? "P" : "F"}
-              </div>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-white">{fact.body}</p>
-                <div className="mt-0.5 flex gap-1.5">
-                  {fact.tags?.filter((t) => t !== "fact").map((tag) => (
-                    <span key={tag} className="rounded bg-white/8 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ))
-        )}
-        {facts.length > 5 && (
-          <p className="px-3 text-xs text-muted-foreground">+{facts.length - 5} more</p>
-        )}
-      </div>
-    </Card>
-  );
-}
 

@@ -9,7 +9,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
   const { data, error } = await supabase
-    .from("health_tracking")
+    .from("mood_tracking")
     .select("*")
     .eq("user_id", user.id)
     .order("date", { ascending: false })
@@ -26,14 +26,12 @@ export async function POST(request: Request) {
   }
   const body = await request.json().catch(() => ({}));
   const { data, error } = await supabase
-    .from("health_tracking")
+    .from("mood_tracking")
     .insert({
       user_id: user.id,
-      date: body.date || new Date().toISOString().split("T")[0],
-      sleep_hours: body.sleep_hours ?? null,
-      food: body.food ?? null,
-      water_ml: body.water_ml ?? null,
-      mood: body.mood ?? null,
+      date: body.date || new Date().toISOString(),
+      mood: body.mood || "neutral",
+      intensity: body.intensity ?? null,
       notes: body.notes ?? null,
     })
     .select()

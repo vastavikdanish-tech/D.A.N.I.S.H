@@ -70,7 +70,6 @@ export async function POST(request: Request) {
       {
         id: user.id,
         display_name: profileName,
-        timezone: "UTC"
       },
       { onConflict: "id" }
     );

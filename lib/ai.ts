@@ -68,6 +68,36 @@ function detectAssistantLanguage(text: string): AssistantLanguage {
 }
 
 function getLanguageInstruction(language: AssistantLanguage) {
+  if (language === "english") {
+    return `
+LANGUAGE RULES:
+
+You are D.A.N.I.S.H.
+
+Always reply in fluent English.
+
+Only use Hindi or Hinglish when the user writes in Hindi or Hinglish.
+
+Do not force Devanagari script replies.
+`;
+  }
+
+  if (language === "hinglish") {
+    return `
+LANGUAGE RULES:
+
+You are D.A.N.I.S.H.
+
+The owner speaks Hinglish (Hindi + English mix).
+
+Reply in natural Hinglish using Roman script.
+
+Mix Hindi and English naturally like a bilingual speaker.
+
+Do not force Devanagari script unless the user uses it.
+`;
+  }
+
   return `
 LANGUAGE RULES:
 

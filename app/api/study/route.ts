@@ -9,11 +9,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
   const { data, error } = await supabase
-    .from("health_tracking")
+    .from("study_tracking")
     .select("*")
     .eq("user_id", user.id)
-    .order("date", { ascending: false })
-    .limit(30);
+    .order("created_at", { ascending: false })
+    .limit(50);
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true, data });
 }
@@ -26,15 +26,13 @@ export async function POST(request: Request) {
   }
   const body = await request.json().catch(() => ({}));
   const { data, error } = await supabase
-    .from("health_tracking")
+    .from("study_tracking")
     .insert({
       user_id: user.id,
-      date: body.date || new Date().toISOString().split("T")[0],
-      sleep_hours: body.sleep_hours ?? null,
-      food: body.food ?? null,
-      water_ml: body.water_ml ?? null,
-      mood: body.mood ?? null,
-      notes: body.notes ?? null,
+      subject: body.subject || "General",
+      duration_minutes: body.duration_minutes || 30,
+      notes: body.notes || null,
+      date: new Date().toISOString().split("T")[0],
     })
     .select()
     .single();

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { CommandCenter } from "@/components/command-center";
 
 export default function AuthGate() {
-  const { session, user, isLoading, signOut } = useAuth();
+  const { session, isLoading } = useAuth();
 
   if (isLoading) {
     return (
@@ -39,23 +39,5 @@ export default function AuthGate() {
     );
   }
 
-  return (
-    <div className="mx-auto min-h-screen w-full max-w-[1720px] p-3 sm:p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-white/10 bg-black/60 p-4 text-white shadow-glow">
-        <div>
-          <p className="text-sm uppercase text-cyan-soft">Signed in as</p>
-          <p className="text-lg font-semibold">{user?.email ?? "Authenticated user"}</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Link href="/">
-            <Button variant="secondary">Home</Button>
-          </Link>
-          <Button variant="danger" onClick={signOut}>
-            Sign Out
-          </Button>
-        </div>
-      </div>
-      <CommandCenter />
-    </div>
-  );
+  return <CommandCenter />;
 }

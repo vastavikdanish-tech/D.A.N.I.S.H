@@ -6,8 +6,6 @@ import { useAuth } from "@/components/auth-provider";
 import { Button } from "@/components/ui/button";
 import { ArrowRight, CheckCircle, Loader2 } from "lucide-react";
 
-export const dynamic = "force-dynamic";
-
 type OnboardingStep = "welcome" | "name" | "timezone" | "voice" | "complete";
 
 export function Onboarding({ onComplete, isOpen }: { onComplete: () => void; isOpen: boolean }) {
