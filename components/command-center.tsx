@@ -265,11 +265,54 @@ export function CommandCenter() {
     loadProfile();
   }, [loadProfile]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") return;
+    let mounted = true;
+    async function checkNotifications() {
+      try {
+        const res = await authFetch("/api/notifications");
+        const json = await res.json();
+        if (!mounted || !json?.ok || !json.data?.length) return;
+        for (const reminder of json.data) {
+          if (!mounted) break;
+          const n = new Notification(reminder.title || "Reminder", {
+            body: reminder.body || "Your reminder is due.",
+            tag: reminder.id,
+          });
+          n.onclick = () => {
+            window.focus();
+            n.close();
+          };
+        }
+      } catch {
+      }
+    }
+    checkNotifications();
+    const interval = setInterval(checkNotifications, 60_000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [authFetch]);
+
   const handleOnboardingComplete = () => {
     setShowOnboarding(false);
     const storedWakeWord = typeof window !== "undefined" ? localStorage.getItem("danish_wake_word") : null;
     if (storedWakeWord) setWakeWord(storedWakeWord);
     loadProfile();
+    if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
   };
 
   const navigate = useCallback((sectionId: string) => {
