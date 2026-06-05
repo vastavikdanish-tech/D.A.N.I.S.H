@@ -27,6 +27,10 @@ export async function executeAction(command: string, ctx: ActionContext): Promis
     return handleSaveMemory(command, ctx);
   }
 
+  if (isWindowsCommand(lower)) {
+    return handleWindowsCommand(command, ctx);
+  }
+
   return null;
 }
 
@@ -204,5 +208,75 @@ async function handleSaveMemory(command: string, ctx: ActionContext): Promise<Ac
     return { handled: true, message: `Could not save memory: ${json?.error || "Something went wrong."}` };
   } catch {
     return { handled: true, message: "Could not save memory. Please try again." };
+  }
+}
+
+const windowsCommands: Record<string, { command: string; label: string }> = {
+  "open chrome": { command: "open_chrome", label: "Chrome" },
+  "launch chrome": { command: "open_chrome", label: "Chrome" },
+  "start chrome": { command: "open_chrome", label: "Chrome" },
+  "open vs code": { command: "open_vscode", label: "VS Code" },
+  "launch vs code": { command: "open_vscode", label: "VS Code" },
+  "start vs code": { command: "open_vscode", label: "VS Code" },
+  "open vscode": { command: "open_vscode", label: "VS Code" },
+  "open explorer": { command: "open_explorer", label: "File Explorer" },
+  "open file explorer": { command: "open_explorer", label: "File Explorer" },
+  "lock pc": { command: "lock_pc", label: "PC lock" },
+  "lock computer": { command: "lock_pc", label: "PC lock" },
+  "shutdown pc": { command: "shutdown_pc", label: "PC shutdown" },
+  "shutdown computer": { command: "shutdown_pc", label: "PC shutdown" },
+  "restart pc": { command: "restart_pc", label: "PC restart" },
+  "restart computer": { command: "restart_pc", label: "PC restart" },
+};
+
+function isWindowsCommand(lower: string): boolean {
+  return Object.keys(windowsCommands).some((key) => lower === key || lower.startsWith(key + " "));
+}
+
+function parseWindowsCommand(lower: string): { command: string; label: string; payload?: Record<string, string> } | null {
+  for (const [key, cmd] of Object.entries(windowsCommands)) {
+    if (lower === key) return cmd;
+    if (lower.startsWith(key + " ")) {
+      const rest = lower.slice(key.length).trim();
+      if (cmd.command === "open_chrome" && rest) {
+        return { ...cmd, payload: { url: rest } };
+      }
+      if (cmd.command === "open_explorer" && rest) {
+        return { ...cmd, payload: { path: rest } };
+      }
+      return cmd;
+    }
+  }
+  return null;
+}
+
+async function handleWindowsCommand(command: string, ctx: ActionContext): Promise<ActionResult> {
+  const lower = command.toLowerCase().trim();
+  const parsed = parseWindowsCommand(lower);
+  if (!parsed) {
+    return { handled: true, message: `Could not parse command: ${command}` };
+  }
+
+  const payload: Record<string, string> = {};
+  if (parsed.payload?.url) payload.url = parsed.payload.url;
+  if (parsed.payload?.path) payload.path = parsed.payload.path;
+
+  try {
+    const res = await ctx.authFetch("/api/devices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        device_type: "laptop",
+        action: parsed.command,
+        payload,
+      }),
+    });
+    const json = await res.json();
+    if (json?.ok) {
+      return { handled: true, message: `Command sent: ${parsed.label}.` };
+    }
+    return { handled: true, message: `Could not send command: ${json?.error || "Unknown error"}` };
+  } catch {
+    return { handled: true, message: "Could not send command due to network error." };
   }
 }

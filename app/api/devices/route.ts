@@ -35,19 +35,41 @@ export async function POST(request: Request) {
     if (supabase) {
       const userId = await getUserIdFromRequest(request);
       
-      if (!userId || !body.deviceId) {
-        return NextResponse.json({ ok: false, error: "userId and deviceId required" }, { status: 400 });
+      if (!userId) {
+        return NextResponse.json({ ok: false, error: "Authentication required" }, { status: 401 });
       }
-      
-      // Validate deviceId is UUID format
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (!uuidRegex.test(body.deviceId)) {
-        return NextResponse.json({ ok: false, error: "deviceId must be a valid UUID" }, { status: 400 });
+
+      const sentinelId = "00000000-0000-4000-a000-000000000000";
+      let targetDeviceId = body.deviceId;
+
+      if (targetDeviceId === sentinelId || body.device_type) {
+        const deviceType = body.device_type || "laptop";
+        const { data: devices } = await supabase
+          .from("devices")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("device_type", deviceType)
+          .contains("health", JSON.stringify({ approved: true }))
+          .limit(1);
+
+        if (devices && devices.length > 0) {
+          targetDeviceId = devices[0].id;
+        } else {
+          return NextResponse.json({
+            ok: true,
+            queued: null,
+            message: `No approved ${deviceType} device found. Register and approve a device first.`
+          });
+        }
       }
-      
+
+      if (!targetDeviceId) {
+        return NextResponse.json({ ok: false, error: "deviceId required" }, { status: 400 });
+      }
+
       const insert = {
         user_id: userId,
-        device_id: body.deviceId,
+        device_id: targetDeviceId,
         command: body.action ?? "open_app",
         payload: body.payload ?? {},
         status: "queued",

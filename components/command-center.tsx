@@ -23,15 +23,11 @@ import {
   Menu,
   Mic,
   Monitor,
-  PanelLeft,
   Play,
-  Power,
   Search,
   Settings,
-  ShieldCheck,
   Smartphone,
   Sparkles,
-  Volume2,
   Wifi,
   Workflow,
   Zap
@@ -349,7 +345,7 @@ export function CommandCenter() {
           <MobileSectionNav />
           <ModuleGrid />
           <div className="grid gap-4 lg:grid-cols-[1.08fr_0.92fr]">
-            <RemoteControl authFetch={authFetch} profile={profile} />
+            <RemoteControl authFetch={authFetch} />
             <AutomationPanel authFetch={authFetch} />
           </div>
           <div className="grid gap-4 lg:grid-cols-[0.88fr_1.12fr]">
@@ -979,90 +975,179 @@ function ModuleGrid() {
   );
 }
 
-function RemoteControl({ authFetch, profile }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response>; profile?: UserProfile | null }) {
+type DeviceEntry = {
+  id?: string;
+  name?: string;
+  device_type?: string;
+  health?: Record<string, unknown> | null;
+  created_at?: string;
+  last_seen?: string;
+};
+
+type DeviceCommandEntry = {
+  id: string;
+  command: string;
+  status: string;
+  created_at: string;
+  result?: Record<string, unknown> | null;
+};
+
+function RemoteControl({ authFetch }: { authFetch: (input: RequestInfo, init?: RequestInit) => Promise<Response> }) {
+  const [devices, setDevices] = useState<DeviceEntry[]>([]);
+  const [commands, setCommands] = useState<DeviceCommandEntry[]>([]);
+  const [loading, setLoading] = useState(true);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
 
-  async function queueDeviceAction(action: string) {
+  const loadDevices = useCallback(async () => {
+    try {
+      const res = await authFetch("/api/devices");
+      const json = await res.json();
+      if (json?.ok && json?.data) setDevices(json.data);
+    } catch { /* ignore */ }
+    try {
+      const res = await authFetch("/api/devices/audit");
+      const json = await res.json();
+      if (json?.ok && json?.data) setCommands(json.data.slice(0, 10));
+    } catch { /* ignore */ }
+    setLoading(false);
+  }, [authFetch]);
+
+  useEffect(() => { loadDevices(); }, [loadDevices]);
+
+  async function queueDeviceAction(action: string, deviceId?: string) {
     setPendingAction(action);
     setActionStatus(null);
-    setActionError(null);
-
     try {
       const res = await authFetch("/api/devices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deviceId: "00000000-0000-4000-a000-000000000000", action })
+        body: JSON.stringify(deviceId ? { deviceId, action } : { device_type: "laptop", action })
       });
       const json = await res.json();
-      if (json?.ok) {
-        setActionStatus(`${action.replace(/_/g, " ")} queued.`);
-      } else {
-        setActionError(json?.error || "Unable to queue device command.");
-      }
+      setActionStatus(json?.ok
+        ? (json.queued ? `${action.replace(/_/g, " ")} queued.` : json.message || "Sent.")
+        : json?.error || "Failed."
+      );
     } catch {
-      setActionError("Unable to reach device command API.");
+      setActionStatus("Unable to reach device command API.");
     } finally {
       setPendingAction(null);
     }
   }
 
+  async function approveDevice(deviceId: string) {
+    try {
+      await authFetch("/api/devices/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_id: deviceId })
+      });
+      loadDevices();
+    } catch { /* ignore */ }
+  }
+
+  const onlineDevices = devices.filter((d) => d.health?.status === "online");
+  const pendingDevices = devices.filter((d) => !d.health?.approved);
+
   return (
     <Card id="remote" className="min-h-[410px]">
       <CardHeader>
         <CardTitle>Remote Control</CardTitle>
-        <span className="text-xs text-muted-foreground">{pendingAction ? "Queueing command" : "Connected to laptop"}</span>
+        <span className="text-xs text-muted-foreground">
+          {loading ? "Loading..." : `${onlineDevices.length} device${onlineDevices.length !== 1 ? "s" : ""} online`}
+        </span>
       </CardHeader>
-      <div className="mb-4 flex items-center gap-3">
-        <div className="grid size-10 place-items-center rounded-md bg-mint/10 text-mint">
-          <Laptop className="size-5" />
+
+      {loading ? (
+        <div className="flex items-center justify-center py-8">
+          <span className="text-sm text-muted-foreground">Loading devices...</span>
         </div>
-        <div>
-          <p className="font-medium text-white">{profile?.display_name || "User"}&apos;s Laptop</p>
-          <p className="text-xs text-muted-foreground">Windows 11 Pro</p>
-        </div>
-      </div>
-      <div className="rounded-lg border border-cyan-electric/14 bg-black/35 p-3">
-        <div className="relative aspect-video overflow-hidden rounded-md border border-cyan-electric/14 bg-[#06111d]">
-          <div className="absolute inset-x-0 bottom-0 h-10 bg-black/28" />
-          <div className="absolute left-[18%] top-[15%] h-[70%] w-[54%] rounded-[38%] bg-[radial-gradient(circle_at_30%_30%,#35d9ff,transparent_45%),radial-gradient(circle_at_70%_55%,#2248ff,transparent_48%)] blur-sm" />
-          <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 gap-2">
-            {Array.from({ length: 9 }).map((_, index) => (
-              <span key={index} className="size-2 rounded-full bg-white/50" />
-            ))}
-          </div>
-          <div className="absolute left-3 top-3 space-y-2">
-            {[Power, PanelLeft, Monitor, Volume2, ShieldCheck].map((Icon) => (
-              <div key={Icon.displayName} className="grid size-8 place-items-center rounded-md border border-white/10 bg-black/40">
-                <Icon className="size-4 text-cyan-soft" />
+      ) : (
+        <>
+          {/* Online Devices */}
+          {onlineDevices.map((device) => (
+            <div key={device.id} className="mb-3 flex items-center gap-3">
+              <div className="relative grid size-10 place-items-center rounded-md bg-mint/10 text-mint">
+                <Laptop className="size-5" />
+                <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-mint shadow-[0_0_6px_#00ff88]" />
               </div>
-            ))}
+              <div className="flex-1">
+                <p className="font-medium text-white">{device.name}</p>
+                <p className="text-xs text-muted-foreground">{device.device_type} &middot; Online</p>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => queueDeviceAction("lock_pc", device.id)} disabled={Boolean(pendingAction)}>
+                <CirclePower className="size-4" />
+              </Button>
+            </div>
+          ))}
+
+          {/* Pending Devices (not yet approved) */}
+          {pendingDevices.map((device) => (
+            <div key={device.id} className="mb-3 flex items-center gap-3 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+              <div className="grid size-10 place-items-center rounded-md bg-amber/10 text-amber">
+                <Smartphone className="size-5" />
+              </div>
+              <div className="flex-1">
+                <p className="font-medium text-white">{device.name || "New Device"}</p>
+                <p className="text-xs text-muted-foreground">Pending approval</p>
+              </div>
+              <Button size="sm" variant="secondary" onClick={() => device.id && approveDevice(device.id)}>
+                Approve
+              </Button>
+            </div>
+          ))}
+
+          {/* No devices state */}
+          {devices.length === 0 && (
+            <div className="mb-4 rounded-lg border border-cyan-electric/14 bg-black/35 p-4 text-center">
+              <Laptop className="mx-auto mb-2 size-8 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">No devices connected.</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Run <code className="rounded bg-white/10 px-1 py-0.5 text-xs">.\agents\windows-agent.ps1 -ServerUrl $env:PUBLIC_URL</code> on your PC to connect.
+              </p>
+            </div>
+          )}
+
+          {/* Quick Actions */}
+          <div className="mt-4 rounded-lg border border-cyan-electric/14 bg-black/35 p-3">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">Quick Actions</p>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" size="sm" disabled={Boolean(pendingAction)} onClick={() => queueDeviceAction("open_chrome")}>
+                Chrome
+              </Button>
+              <Button variant="secondary" size="sm" disabled={Boolean(pendingAction)} onClick={() => queueDeviceAction("open_vscode")}>
+                VS Code
+              </Button>
+              <Button variant="secondary" size="sm" disabled={Boolean(pendingAction)} onClick={() => queueDeviceAction("lock_pc")}>
+                Lock
+              </Button>
+              <Button variant="danger" size="sm" disabled={Boolean(pendingAction)} onClick={() => queueDeviceAction("shutdown_pc")}>
+                Shutdown
+              </Button>
+            </div>
           </div>
-        </div>
-      </div>
-      <div className="mt-4 flex gap-3">
-        <Button
-          variant="danger"
-          className="flex-1"
-          disabled={Boolean(pendingAction)}
-          onClick={() => queueDeviceAction("disconnect")}
-        >
-          <CirclePower className="size-4" />
-          {pendingAction === "disconnect" ? "Queueing..." : "Disconnect"}
-        </Button>
-        <Button
-          variant="secondary"
-          className="flex-1"
-          disabled={Boolean(pendingAction)}
-          onClick={() => queueDeviceAction("fullscreen")}
-        >
-          <Monitor className="size-4" />
-          {pendingAction === "fullscreen" ? "Queueing..." : "Full Screen"}
-        </Button>
-      </div>
-      {actionStatus ? <p className="mt-3 text-xs text-mint">{actionStatus}</p> : null}
-      {actionError ? <p className="mt-3 text-xs text-danger">{actionError}</p> : null}
+
+          {/* Recent Commands */}
+          {commands.length > 0 && (
+            <div className="mt-4">
+              <p className="mb-2 text-xs font-medium text-muted-foreground">Recent Commands</p>
+              <div className="space-y-1">
+                {commands.map((cmd) => (
+                  <div key={cmd.id} className="flex items-center justify-between rounded-md bg-black/20 px-3 py-1.5">
+                    <span className="text-xs text-white">{cmd.command.replace(/_/g, " ")}</span>
+                    <span className={`text-xs ${cmd.status === "executed" ? "text-mint" : cmd.status === "failed" ? "text-danger" : "text-amber"}`}>
+                      {cmd.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {actionStatus ? <p className="mt-3 text-xs text-mint">{actionStatus}</p> : null}
+        </>
+      )}
     </Card>
   );
 }
