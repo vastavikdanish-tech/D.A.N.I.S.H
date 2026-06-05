@@ -30,15 +30,6 @@ export default function manifest(): MetadataRoute.Manifest {
       { src: "/icons/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
       { src: "/icons/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
     ],
-    screenshots: [
-      {
-        src: "/screenshots/home.png",
-        sizes: "1080x2340",
-        type: "image/png",
-        form_factor: "narrow",
-        label: "D.A.N.I.S.H Home Screen",
-      },
-    ],
     shortcuts: [
       {
         name: "Chat",

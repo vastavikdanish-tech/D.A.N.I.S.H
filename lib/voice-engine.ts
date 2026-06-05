@@ -587,7 +587,7 @@ export class VoiceEngine {
     const signal = this.currentSentenceController.signal;
 
     try {
-      const res = await fetch(`${this.tts["voiceServiceUrl"]}/tts/stream`, {
+      const res = await fetch(`${this.tts["voiceServiceUrl"]}/tts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -598,20 +598,10 @@ export class VoiceEngine {
         }),
         signal,
       });
-      if (!res.ok) throw new Error("Stream failed");
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error("No stream body");
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (signal.aborted) {
-          reader.cancel();
-          break;
-        }
-        const blob = new Blob([value], { type: "audio/mpeg" });
-        this.audio.enqueue(crypto.randomUUID(), blob);
-      }
+      if (!res.ok) throw new Error("TTS failed");
+      if (signal.aborted) return;
+      const blob = await res.blob();
+      this.audio.enqueue(crypto.randomUUID(), blob);
     } catch {
       this.speakBrowser(text);
     }
