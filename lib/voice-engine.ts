@@ -150,10 +150,10 @@ export class AudioController {
     const iv = setInterval(() => {
       i++;
       const t = i / steps;
-      this.audioEl!.volume = startVol * (1 - t);
+      if (this.audioEl) this.audioEl.volume = startVol * (1 - t);
       if (i >= steps) {
         clearInterval(iv);
-        this.stopCurrent();
+        if (this.audioEl) this.stopCurrent();
         this.audioEl = null;
         this._volume = startVol;
       }
@@ -619,7 +619,6 @@ export class VoiceEngine {
 
   interrupt() {
     this.currentSentenceController?.abort();
-    this.audio.fadeOut(150);
     this.audio.clear();
     this.state.transition("listening");
     this.stt.start(
