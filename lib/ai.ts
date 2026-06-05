@@ -267,15 +267,37 @@ export async function generateAssistantResponse(
         },
         {
           name: "control_device",
-          description: "Send a command to a connected device.",
+          description: "Send a command to a connected device. Use this when the user asks to control their computer (open apps, volume, screenshots, shutdown, etc.).",
           parameters: {
             type: "OBJECT",
             properties: {
-              deviceId: { type: "STRING", description: "The UUID of the device." },
-              action: { type: "STRING", description: "The action to perform (e.g., open_app, shutdown, lock)." },
-              payload: { type: "OBJECT", description: "Optional parameters for the action." }
+              deviceId: { type: "STRING", description: "The UUID of the device. Get this from list_devices first." },
+              action: { type: "STRING", description: "Action: open_app, open_chrome, open_vscode, open_explorer, open_website, close_app, lock_pc, shutdown_pc, restart_pc, volume_mute, volume_set, volume_up, volume_down, brightness_set, screenshot, clipboard_copy, clipboard_paste, system_info, list_apps, mouse_move, mouse_click, keyboard_type, toggle_wifi" },
+              payload: { type: "OBJECT", description: "Parameters: { app, url, path, text, level, x, y } depending on action." }
             },
             required: ["deviceId", "action"]
+          }
+        },
+        {
+          name: "list_devices",
+          description: "List all registered devices and their status. Call this first before control_device if you need the deviceId.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              _dummy: { type: "STRING", description: "Unused." }
+            },
+            required: []
+          }
+        },
+        {
+          name: "get_device_status",
+          description: "Get the status and last known info about a specific device.",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              deviceId: { type: "STRING", description: "The UUID of the device." }
+            },
+            required: ["deviceId"]
           }
         },
         {

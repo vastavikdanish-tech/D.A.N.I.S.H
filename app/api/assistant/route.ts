@@ -145,6 +145,27 @@ export async function POST(request: Request) {
               call, 
               result: error ? { error: error.message } : { status: "success", message: `Command ${asString(args.action, "open_app")} sent to device` } 
             });
+          } else if (name === "list_devices") {
+            const { data, error } = await supabase
+              .from("devices")
+              .select("id, name, device_type, status, last_seen_at")
+              .eq("user_id", user.id)
+              .order("last_seen_at", { ascending: false });
+            toolResults.push({
+              call,
+              result: error ? { error: error.message } : { status: "success", data: data || [] }
+            });
+          } else if (name === "get_device_status") {
+            const { data, error } = await supabase
+              .from("devices")
+              .select("id, name, device_type, status, last_seen_at, health")
+              .eq("id", asString(args.deviceId))
+              .eq("user_id", user.id)
+              .single();
+            toolResults.push({
+              call,
+              result: error ? { error: error.message } : { status: "success", data }
+            });
           } else if (name === "search_memories") {
             const searchQuery = asString(args.query);
             console.log("[ASSISTANT_ROUTE] Performing semantic search for:", searchQuery);
