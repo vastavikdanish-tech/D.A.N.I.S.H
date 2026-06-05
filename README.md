@@ -1,71 +1,164 @@
-# D.A.N.I.S.H
+# D.A.N.I.S.H - Personal AI Operating System
 
-Dynamic AI Network for Intelligence, Systems & Help.
+Dynamic AI Network for Intelligence, Systems & Help. D.A.N.I.S.H is a personal AI operating system with voice control, PWA support, Android companion, and device control agents.
 
-D.A.N.I.S.H is a dark, futuristic personal AI operating system built with Next.js, TypeScript, TailwindCSS, Framer Motion, ShadCN-style primitives, Supabase-ready data architecture, and provider-neutral AI route contracts.
+## What It Is
 
-## What Is Included
+D.A.N.I.S.H is a full-stack personal AI OS that combines:
+- A Next.js web dashboard with voice-enabled AI assistant
+- Progressive Web App (PWA) for mobile browser install
+- Android companion app with local agent capabilities
+- Windows device control agent for local machine automation
+- Voice service powered by edge-tts for natural speech
+- System controller for executing device commands
+- Supabase backend for persistence, auth, and real-time sync
+- Gemini AI for intelligent assistant responses and embeddings
+- Memory system with vector search (3072-dim embeddings)
 
-- Responsive command center dashboard
-- AI Assistant, Voice Engine, Remote Control, Automation Engine, Content Factory, Study OS, Career OS, Knowledge Vault, Goals, and Notifications surfaces
-- API routes for assistant messages, device commands, and automations
-- Supabase schema with row-level security
-- Environment template for Supabase, Gemini, and OpenAI-compatible providers
-- Reusable typed data model and component structure
+## Quick Start
 
-## Getting Started
+### Prerequisites
+
+- Node.js 18+ (npm 9+)
+- Python 3.10+
+- A Supabase account (free tier works)
+- A Google Gemini API key
+
+### Setup
+
+1. Clone the repository and install dependencies:
 
 ```bash
 npm install
-npm run dev
+pip install -r voice-service/requirements.txt
+pip install fastapi uvicorn edge-tts pyautogui
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
-
-On Windows PowerShell, if `npm` is blocked by script policy, use:
+2. Copy the environment template and fill in your keys:
 
 ```bash
-npm.cmd install
-npm.cmd run dev
+cp .env.example .env.local
 ```
 
-## Environment
+3. Run the Supabase schema (`supabase/schema.sql`) in your Supabase SQL editor to create all tables and RLS policies.
 
-Copy `.env.example` to `.env.local` and add your keys:
+4. Launch all services:
 
-```bash
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-OPENAI_API_KEY=
-GEMINI_API_KEY=
-NEXT_PUBLIC_APP_URL=http://localhost:3000
+```powershell
+.\start.ps1
 ```
 
-The assistant route currently falls back to a local simulator when no model key is configured. This keeps the app usable while providers are being wired.
+This starts the Next.js dev server (port 3000), the voice service (port 8765), and the system controller (port 8766).
 
-## Supabase
+## Environment Variables
 
-Run `supabase/schema.sql` in your Supabase SQL editor. It creates:
+All environment variables are defined in `.env.example` and should be copied to `.env.local`:
 
-- Profiles
-- Long-term memories
-- Devices and device commands
-- Automations
-- Goals
-- Content projects
-- Study assets
+| Variable | Description |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anonymous (public) API key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key (bypasses RLS) |
+| `OPENAI_API_KEY` | OpenAI API key (optional, for fallback) |
+| `GEMINI_API_KEY` | Google Gemini API key for assistant and embeddings |
+| `NEXT_PUBLIC_APP_URL` | Public URL of the app (default: http://localhost:3000) |
 
-## Architecture Notes
+## Launching All Services
 
-Remote computer control is represented as a safe command queue. The production desktop client should be a signed Electron or Tauri app that subscribes to a Supabase Realtime channel, validates user/device permissions, executes approved commands, and writes command results back to `device_commands`.
+Run the startup script from the project root:
 
-The AI layer is intentionally provider-neutral. The `/api/assistant` route accepts a stable request shape and can be connected to Gemini, OpenAI, or any OpenAI-compatible endpoint without changing the frontend.
+```powershell
+.\start.ps1
+```
 
-## Next Milestones
+Options:
+- `-NoVoice` - Skip starting the voice service
+- `-NoController` - Skip starting the system controller
+- `-NoDev` - Skip starting the Next.js dev server
 
-- Add Supabase Auth with Google login
-- Connect real chat persistence and memory search
-- Build the desktop device agent
-- Add file upload parsing for Study OS and Knowledge Vault
-- Add content generation jobs for clips, captions, thumbnails, and scripts
+## Architecture Overview
+
+```
+                         +------------------+
+                         |   Web Browser    |
+                         |  (PWA capable)   |
+                         +--------+---------+
+                                  |
+                    +-------------+-------------+
+                    |      Next.js (Vercel)     |
+                    |  - App Router / API       |
+                    |  - Assistant route        |
+                    |  - Device command route   |
+                    |  - Automation route       |
+                    +-------------+-------------+
+                                  |
+         +------------------------+------------------------+
+         |                        |                        |
++--------+--------+     +---------+--------+     +--------+--------+
+|   Supabase      |     |   Voice Service  |     | System          |
+|  - PostgreSQL   |     |   (edge-tts)     |     | Controller      |
+|  - Auth         |     |   Port 8765      |     | Port 8766       |
+|  - Realtime     |     +------------------+     +--------+--------+
+|  - Vector store |                                          |
++-----------------+                               +---------+---------+
+                                                  | Device Agents     |
+                                                  | (Windows, Android)|
+                                                  +-------------------+
+```
+
+- **Frontend**: Next.js 15 with TypeScript, TailwindCSS, Framer Motion, ShadCN-style components
+- **Backend**: Supabase (Postgres + Auth + Realtime + pgvector)
+- **AI**: Google Gemini for chat completion and text embeddings (3072-dim)
+- **Voice**: Python edge-tts service for text-to-speech
+- **Device Control**: Python system controller + platform-specific agent scripts
+- **Mobile**: Android companion app (Gradle-based) with local agent
+
+## Project Structure
+
+| Path | Description |
+|---|---|
+| `app/` | Next.js App Router pages and API routes |
+| `components/` | React UI components (shell, modules, auth, PWA) |
+| `lib/` | Shared utilities and client libraries |
+| `types/` | TypeScript type definitions |
+| `public/` | Static assets, PWA icons, service worker |
+| `supabase/` | Database schema and migrations |
+| `voice-service/` | Python edge-tts voice service |
+| `system-controller/` | Python device command executor |
+| `agents/` | Platform-specific agent scripts (Windows, Android) |
+| `android/` | Android companion app source |
+| `scripts/` | Utility scripts (icon generation, database seeding) |
+| `data/` | Data files and configuration |
+| `start.ps1` | PowerShell launcher for all services |
+
+## Development Scripts
+
+| Command | Description |
+|---|---|
+| `npm run dev` | Start Next.js dev server |
+| `npm run build` | Build for production |
+| `npm run start` | Start production server |
+| `npm run lint` | Lint with Next.js ESLint config |
+| `npm run typecheck` | Run TypeScript type checking |
+| `node scripts/seed.mjs` | Seed test data into the database |
+| `.\start.ps1` | Launch all services concurrently |
+
+## Deployment
+
+### Web (Vercel)
+
+1. Push the repository to GitHub.
+2. Import the project in Vercel.
+3. Set all environment variables from `.env.local` in Vercel's dashboard.
+4. Deploy. The `vercel.json` or Next.js config handles the build settings automatically.
+
+### Android APK
+
+1. Open `android/` in Android Studio.
+2. Update `local.properties` with your SDK path (use `local.properties.template` as reference).
+3. Build the APK via Build > Build Bundle(s) / APK(s) > Build APK.
+4. The unsigned APK will be at `android/app/build/outputs/apk/debug/`.
+
+## License
+
+MIT - see [LICENSE](./LICENSE).

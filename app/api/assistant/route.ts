@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { assistantRequestSchema, generateAssistantResponse, generateEmbedding } from "@/lib/ai";
 import { getSupabaseAdminClient } from "@/lib/supabase.server";
 import { getUserFromRequest } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 type MemoryContext = {
   id?: string;
@@ -28,6 +29,14 @@ function asStringArray(value: unknown) {
 }
 
 export async function POST(request: Request) {
+  const { allowed, headers: rateLimitHeaders } = rateLimit(request);
+  if (!allowed) {
+    return NextResponse.json(
+      { ok: false, error: "Rate limit exceeded. Try again later." },
+      { status: 429, headers: rateLimitHeaders }
+    );
+  }
+
   try {
     const json = await request.json();
     const payload = assistantRequestSchema.parse(json);

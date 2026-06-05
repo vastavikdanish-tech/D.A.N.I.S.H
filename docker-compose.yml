@@ -1,0 +1,24 @@
+version: "3.8"
+
+services:
+  voice-service:
+    build:
+      context: .
+      dockerfile: voice-service/Dockerfile
+    ports:
+      - "8765:8765"
+    networks:
+      - danish-net
+
+  system-controller:
+    build:
+      context: .
+      dockerfile: system-controller/Dockerfile
+    ports:
+      - "8766:8766"
+    networks:
+      - danish-net
+
+networks:
+  danish-net:
+    driver: bridge

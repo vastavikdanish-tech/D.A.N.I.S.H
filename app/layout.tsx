@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/components/auth-provider";
+import * as Sentry from "@sentry/nextjs";
 
 const APP_NAME = "D.A.N.I.S.H";
 const APP_DESCRIPTION = "Dynamic AI Network for Intelligence, Systems & Help";
@@ -45,17 +46,42 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return (
-    <html lang="en" className="dark">
-      <head>
-        <link rel="mask-icon" href="/icons/icon.svg" color="#00e5ff" />
-        <meta name="mobile-web-app-capable" content="yes" />
-        <meta name="msapplication-TileColor" content="#020509" />
-        <meta name="msapplication-TileImage" content="/icons/icon-144.png" />
-      </head>
-      <body>
-        <AuthProvider>{children}</AuthProvider>
-      </body>
-    </html>
-  );
+  try {
+    if (typeof window !== "undefined") {
+      Sentry.init({
+        dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+        tracesSampleRate: 0.1,
+        replaysSessionSampleRate: 0.1,
+        replaysOnErrorSampleRate: 1.0,
+      });
+    }
+    return (
+      <html lang="en" className="dark">
+        <head>
+          <link rel="mask-icon" href="/icons/icon.svg" color="#00e5ff" />
+          <meta name="mobile-web-app-capable" content="yes" />
+          <meta name="msapplication-TileColor" content="#020509" />
+          <meta name="msapplication-TileImage" content="/icons/icon-144.png" />
+        </head>
+        <body>
+          <AuthProvider>{children}</AuthProvider>
+        </body>
+      </html>
+    );
+  } catch (error) {
+    Sentry.captureException(error);
+    return (
+      <html lang="en" className="dark">
+        <head>
+          <link rel="mask-icon" href="/icons/icon.svg" color="#00e5ff" />
+          <meta name="mobile-web-app-capable" content="yes" />
+          <meta name="msapplication-TileColor" content="#020509" />
+          <meta name="msapplication-TileImage" content="/icons/icon-144.png" />
+        </head>
+        <body>
+          <AuthProvider>{children}</AuthProvider>
+        </body>
+      </html>
+    );
+  }
 }
