@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useCallback, useRef, useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { HomeScreen } from "@/components/home-screen";
-import { LogOut, Command } from "lucide-react";
+import { LogOut, Command, Mic, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { BriefingData } from "@/components/command-center";
 
@@ -21,8 +21,9 @@ const navItems: { id: Screen; label: string }[] = [
   { id: "settings", label: "Settings" },
 ];
 
+type ChatMessage = { role: string; text: string };
+
 export function AppShell({
-  children,
   orbState,
   onCommand,
   wakeWord,
@@ -32,8 +33,10 @@ export function AppShell({
   currentScreen,
   onNavigate,
   voiceServiceOnline,
+  messages,
+  voiceState,
+  onSubmitMessage,
 }: {
-  children: React.ReactNode;
   orbState: "off" | "listening" | "thinking" | "speaking";
   onCommand: (msg: string) => Promise<string | null>;
   wakeWord: string;
@@ -43,10 +46,19 @@ export function AppShell({
   currentScreen?: Screen;
   onNavigate?: (screen: Screen) => void;
   voiceServiceOnline?: boolean;
+  messages?: ChatMessage[];
+  voiceState?: "off" | "listening" | "thinking" | "speaking";
+  onSubmitMessage?: (msg: string) => void;
 }) {
   const { user, signOut } = useAuth();
   const [internalScreen, setInternalScreen] = useState<Screen>("home");
   const screen = currentScreen ?? internalScreen;
+  const [input, setInput] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   const handleNavigate = useCallback((s: Screen) => {
     if (onNavigate) {
@@ -55,6 +67,12 @@ export function AppShell({
       setInternalScreen(s);
     }
   }, [onNavigate]);
+
+  const handleSend = useCallback(() => {
+    if (!input.trim()) return;
+    onSubmitMessage?.(input.trim());
+    setInput("");
+  }, [input, onSubmitMessage]);
 
   const displayName = user?.email?.split("@")[0] || "User";
   const initials = displayName.slice(0, 2).toUpperCase();
@@ -73,7 +91,6 @@ export function AppShell({
           </div>
         </div>
 
-        {/* User badge */}
         <div className="flex items-center gap-3 py-4">
           <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-cyan-electric/10 text-xs font-semibold text-cyan-soft border border-cyan-electric/20">
             {initials}
@@ -84,7 +101,6 @@ export function AppShell({
           </div>
         </div>
 
-        {/* Nav */}
         <nav className="flex-1 space-y-1">
           {navItems.map((item) => (
             <button
@@ -102,7 +118,6 @@ export function AppShell({
           ))}
         </nav>
 
-        {/* Sign out */}
         <button
           onClick={signOut}
           className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:text-danger transition"
@@ -111,7 +126,6 @@ export function AppShell({
           Sign Out
         </button>
 
-        {/* Voice service status */}
         <div className="mt-4 flex items-center gap-2 px-3 text-[10px] text-muted-foreground">
           <span className={cn("size-1.5 rounded-full", voiceServiceOnline === false ? "bg-red-500" : "bg-green-500")} />
           Voice {voiceServiceOnline === false ? "Offline" : "Online"}
@@ -154,10 +168,56 @@ export function AppShell({
               >
                 &larr; Back to Home
               </button>
-              {renderModule ? renderModule(screen) : children}
+              {renderModule ? renderModule(screen) : null}
             </div>
           )}
         </main>
+
+        {/* Chat bar - always visible */}
+        <div className="border-t border-white/5 bg-black/60 backdrop-blur-lg">
+          {/* Messages */}
+          {messages && messages.length > 0 && (
+            <div className="max-h-48 overflow-y-auto space-y-2 px-4 py-3 border-b border-white/5">
+              {messages.map((msg, i) => (
+                <div key={i} className={cn("flex gap-2", msg.role === "user" ? "justify-end" : "justify-start")}>
+                  <span className={cn("max-w-[80%] rounded-2xl px-3 py-1.5 text-xs leading-relaxed", msg.role === "user" ? "bg-cyan-electric/15 text-white rounded-br-sm" : "bg-white/5 text-white/70 rounded-bl-sm")}>
+                    {msg.text}
+                  </span>
+                </div>
+              ))}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+          {/* Input row */}
+          <div className="flex items-center gap-2 px-4 py-2.5">
+            <button
+              type="button"
+              onClick={onMicToggle}
+              className={cn(
+                "grid size-8 shrink-0 place-items-center rounded-full transition",
+                voiceState === "listening" ? "bg-red-500/20 text-red-400" : "bg-white/5 text-white/40 hover:text-white hover:bg-white/10"
+              )}
+            >
+              <Mic className="size-4" />
+            </button>
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSend(); }}
+              placeholder={voiceState === "listening" ? "Listening..." : "Ask D.A.N.I.S.H..."}
+              className="flex-1 bg-transparent text-sm text-white/80 outline-none placeholder:text-white/30"
+            />
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={!input.trim()}
+              className="grid size-8 shrink-0 place-items-center rounded-full text-white/40 hover:text-cyan-soft transition disabled:opacity-30"
+            >
+              <Send className="size-4" />
+            </button>
+          </div>
+        </div>
 
         {/* Mobile bottom nav */}
         <nav className="flex items-center overflow-x-auto gap-1 border-t border-white/5 bg-black/80 backdrop-blur-lg px-2 py-1.5 lg:hidden scrollbar-none">
