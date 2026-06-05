@@ -46,6 +46,7 @@ export function useVoiceEngine() {
   const speakSentences = useCallback(async (fullText: string) => {
     const engine = engineRef.current;
     if (!engine) return;
+    engine.state.transition("speaking");
     const sentences = splitSentences(fullText);
     for (const s of sentences) {
       if (stateRef.current !== "speaking") break;
@@ -109,6 +110,13 @@ export function useVoiceEngine() {
     stopListening,
     toggleListening,
     setOnTranscript: (cb: (text: string) => void) => { onTranscriptRef.current = cb; },
+    setWakeWord: (wakeWord: string) => {
+      const engine = engineRef.current;
+      if (!engine) return;
+      engine.stopWakeWordDetection();
+      engine.setWakeWord(wakeWord, (text) => onTranscriptRef.current(text));
+      engine.startWakeWordDetection();
+    },
     engine: engineRef.current,
   };
 }

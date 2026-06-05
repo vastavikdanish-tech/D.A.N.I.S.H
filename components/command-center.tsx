@@ -7,10 +7,8 @@ import {
   CalendarDays,
   CirclePower,
   Laptop,
-  Mic,
   Smartphone,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { executeAction } from "@/lib/action-engine";
@@ -34,23 +32,9 @@ const ModuleAutomation = dynamic(() => import("@/components/module-automation").
 const ModuleStudy = dynamic(() => import("@/components/module-study").then(m => ({ default: m.ModuleStudy })), { ssr: false });
 const ModuleCareer = dynamic(() => import("@/components/module-career").then(m => ({ default: m.ModuleCareer })), { ssr: false });
 const ModuleHealth = dynamic(() => import("@/components/module-health").then(m => ({ default: m.ModuleHealth })), { ssr: false });
-
-type UserProfile = {
-  id: string;
-  display_name: string;
-  avatar_url: string | null;
-  timezone: string;
-  bio: string | null;
-  wake_word?: string;
-  created_at: string;
-  updated_at: string;
-};
-
 export function CommandCenter() {
   const { getAccessToken, user } = useAuth();
   const [messages, setMessages] = useState<Array<{ role: string; text: string }>>([]);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [profileLoading, setProfileLoading] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [wakeWord, setWakeWord] = useState<string>("Hello Danish");
 
@@ -80,7 +64,6 @@ export function CommandCenter() {
       const res = await authFetch("/api/profile");
       const json = await res.json();
       if (json?.ok && json.data) {
-        setProfile(json.data);
         const storedWakeWord = typeof window !== "undefined" ? localStorage.getItem("danish_wake_word") : null;
         setWakeWord(storedWakeWord || json.data.wake_word || "Hello Danish");
         if (!json.data.display_name) {
@@ -89,8 +72,6 @@ export function CommandCenter() {
       }
     } catch (e) {
       console.error("Failed to load profile:", e);
-    } finally {
-      setProfileLoading(false);
     }
   }, [authFetch, user?.email]);
 
@@ -141,6 +122,10 @@ export function CommandCenter() {
   const voice = useVoiceEngine();
   const voiceRef = useRef(voice);
   voiceRef.current = voice;
+
+  useEffect(() => {
+    if (wakeWord) voice.setWakeWord(wakeWord);
+  }, [wakeWord, voice]);
 
   const handleOnboardingComplete = () => {
     setShowOnboarding(false);

@@ -526,6 +526,9 @@ export class VoiceEngine {
   private _voiceServiceOnline = false;
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
   private onOnlineChangeCb: ((online: boolean) => void) | null = null;
+  private _wakeWord: string = "";
+  private _wakeCallback: ((text: string) => void) | null = null;
+  private _wakeActive = false;
 
   get voiceServiceOnline() {
     return this._voiceServiceOnline;
@@ -619,6 +622,16 @@ export class VoiceEngine {
     this.audio.fadeOut(150);
     this.audio.clear();
     this.state.transition("listening");
+    this.stt.start(
+      (hyp) => {
+        if (hyp.isFinal) {
+          this.state.transition("thinking");
+          this.stt.stop();
+          return hyp.text;
+        }
+        return null;
+      }
+    );
   }
 
   speakBrowser(text: string) {
@@ -632,6 +645,7 @@ export class VoiceEngine {
   }
 
   async startListening() {
+    this.stopWakeWordDetection();
     this.state.transition("listening");
     this.stt.start(
       (hyp) => {
@@ -653,6 +667,43 @@ export class VoiceEngine {
     if (this.state.state === "listening") this.state.transition("off");
   }
 
+  setWakeWord(wakeWord: string, onWake: (text: string) => void) {
+    this._wakeWord = wakeWord.toLowerCase().trim();
+    this._wakeCallback = onWake;
+  }
+
+  private onWakeEnd = () => {
+    if (this._wakeActive) {
+      this.startWakeWordDetection();
+    }
+  };
+
+  startWakeWordDetection() {
+    if (this._wakeActive || !this._wakeWord) return;
+    this._wakeActive = true;
+    const wakeLower = this._wakeWord;
+    this.stt.start(
+      (hyp) => {
+        if (hyp.isFinal) {
+          const text = hyp.text.toLowerCase().trim();
+          if (text.startsWith(wakeLower)) {
+            const remainder = hyp.text.trim().slice(wakeLower.length).trim();
+            this._wakeActive = false;
+            this.stt.stop();
+            this.state.transition("thinking");
+            this._wakeCallback?.(remainder || hyp.text.trim());
+          }
+        }
+      },
+      this.onWakeEnd
+    );
+  }
+
+  stopWakeWordDetection() {
+    this._wakeActive = false;
+    this.stt.stop();
+  }
+
   async setupBargeIn() {
     await this.detector.start();
     this.detector.onUserSpeechStart(() => {
@@ -664,6 +715,7 @@ export class VoiceEngine {
 
   destroy() {
     this.stopHealthChecks();
+    this.stopWakeWordDetection();
     this.audio.clear();
     this.audio.stopCurrent();
     this.detector.stop();
