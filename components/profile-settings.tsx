@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import { Camera, Save, Loader2, CheckCircle, AlertCircle } from "lucide-react";
+import { Camera, Save, Loader2, CheckCircle, AlertCircle, Mic } from "lucide-react";
 
 type UserProfile = {
   id: string;
@@ -27,6 +27,7 @@ export function ProfileSettings() {
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
   const [timezone, setTimezone] = useState("UTC");
+  const [wakeWord, setWakeWord] = useState("Hello Danish");
 
   const authFetch = useCallback(async (input: RequestInfo, init: RequestInit = {}) => {
     const headers = new Headers(init.headers ?? {});
@@ -54,6 +55,8 @@ export function ProfileSettings() {
           setBio(json.data.bio || "");
           setTimezone(json.data.timezone || "UTC");
         }
+        const storedWakeWord = typeof window !== "undefined" ? localStorage.getItem("danish_wake_word") : null;
+        if (storedWakeWord) setWakeWord(storedWakeWord);
       } catch (e) {
         console.error("Failed to load profile:", e);
       } finally {
@@ -83,6 +86,7 @@ export function ProfileSettings() {
 
       if (json?.ok && json.data) {
         setProfile(json.data);
+        localStorage.setItem("danish_wake_word", wakeWord.trim());
         setSuccess("Profile saved successfully!");
         setTimeout(() => setSuccess(null), 3000);
       } else {
@@ -223,6 +227,26 @@ export function ProfileSettings() {
                 Avatar upload coming soon. Currently using initials.
               </p>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="wake_word" className="text-sm font-medium text-white">
+              Wake Word
+            </label>
+            <div className="relative">
+              <Mic className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-cyan-soft" />
+              <input
+                id="wake_word"
+                type="text"
+                value={wakeWord}
+                onChange={(e) => setWakeWord(e.target.value)}
+                placeholder="Hello Danish"
+                className="w-full rounded-md border border-white/10 bg-transparent pl-10 pr-3 py-2 text-sm text-white outline-none focus:border-cyan-electric disabled:opacity-50"
+                disabled={saving}
+                maxLength={30}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">Say this phrase to activate hands-free voice mode.</p>
           </div>
 
           <div className="flex items-center gap-3 pt-2">

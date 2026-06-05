@@ -42,6 +42,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { ProfileSettings } from "@/components/profile-settings";
 import { Onboarding } from "@/components/onboarding";
+import { executeAction } from "@/lib/action-engine";
 
 const menu = [
   { label: "Dashboard", icon: LayoutDashboard, href: "#dashboard" },
@@ -238,47 +239,57 @@ export function CommandCenter() {
     return fetch(input, { ...init, headers });
   }, [getAccessToken]);
 
-  useEffect(() => {
-    async function loadProfile() {
-      if (!user?.email) {
-        setProfileLoading(false);
-        return;
-      }
-      try {
-        const res = await authFetch("/api/profile");
-        const json = await res.json();
-        if (json?.ok && json.data) {
-          setProfile(json.data);
-          const storedWakeWord = typeof window !== "undefined" ? localStorage.getItem("danish_wake_word") : null;
-          setWakeWord(storedWakeWord || json.data.wake_word || "Hello Danish");
-          if (!json.data.display_name) {
-            setShowOnboarding(true);
-          }
-        }
-      } catch (e) {
-        console.error("Failed to load profile:", e);
-      } finally {
-        setProfileLoading(false);
-      }
+  const loadProfile = useCallback(async () => {
+    if (!user?.email) {
+      return;
     }
-    loadProfile();
+    try {
+      const res = await authFetch("/api/profile");
+      const json = await res.json();
+      if (json?.ok && json.data) {
+        setProfile(json.data);
+        const storedWakeWord = typeof window !== "undefined" ? localStorage.getItem("danish_wake_word") : null;
+        setWakeWord(storedWakeWord || json.data.wake_word || "Hello Danish");
+        if (!json.data.display_name) {
+          setShowOnboarding(true);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load profile:", e);
+    } finally {
+      setProfileLoading(false);
+    }
   }, [authFetch, user?.email]);
+
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
 
   const handleOnboardingComplete = () => {
     setShowOnboarding(false);
+    const storedWakeWord = typeof window !== "undefined" ? localStorage.getItem("danish_wake_word") : null;
+    if (storedWakeWord) setWakeWord(storedWakeWord);
+    loadProfile();
   };
 
-  const handleWakeWordChange = (newWakeWord: string) => {
-    setWakeWord(newWakeWord);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("danish_wake_word", newWakeWord);
+  const navigate = useCallback((sectionId: string) => {
+    const el = document.getElementById(sectionId);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
     }
-  };
+  }, []);
 
   const submitAssistant = useCallback(async (message: string, mode: string = "assistant") => {
     if (!message) return null;
+
+    const actionResult = await executeAction(message, { authFetch, navigate });
+    if (actionResult) {
+      setMessages((prev) => [...prev, { role: "user", text: message }]);
+      setMessages((prev) => [...prev, { role: "assistant", text: actionResult.message }]);
+      return actionResult.message;
+    }
+
     try {
-      // Optimistically add user message
       setMessages((prev) => [...prev, { role: "user", text: message }]);
       
       const res = await authFetch("/api/assistant", {
@@ -302,7 +313,7 @@ export function CommandCenter() {
       setMessages((prev) => [...prev, { role: "assistant", text: errorMessage }]);
       return errorMessage;
     }
-  }, [authFetch]);
+  }, [authFetch, navigate]);
 
   return (
     <main id="dashboard" className="mx-auto min-h-screen w-full max-w-[1720px] p-3 sm:p-5">
@@ -336,6 +347,7 @@ export function CommandCenter() {
         </section>
       </div>
       <BottomDock />
+      <Onboarding isOpen={showOnboarding} onComplete={handleOnboardingComplete} />
     </main>
   );
 }

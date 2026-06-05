@@ -27,7 +27,7 @@ export function Onboarding({ onComplete, isOpen }: { onComplete: () => void; isO
     return fetch(input, { ...init, headers });
   };
 
-  async function saveProfile() {
+    async function saveProfile() {
     setLoading(true);
     setError(null);
     try {
@@ -41,7 +41,8 @@ export function Onboarding({ onComplete, isOpen }: { onComplete: () => void; isO
       });
       const json = await res.json();
       if (!json?.ok) throw new Error(json?.error || "Failed to save profile");
-    } catch (_) {
+      localStorage.setItem("danish_wake_word", wakeWord.trim());
+    } catch {
       setError("Unable to save profile. Please try again.");
       setLoading(false);
       return;
@@ -84,7 +85,7 @@ export function Onboarding({ onComplete, isOpen }: { onComplete: () => void; isO
           <div className="flex items-center justify-between">
             <h3 className="font-semibold text-white">Setup D.A.N.I.S.H</h3>
             <div className="flex gap-1">
-              {steps.map((s, _) => (
+              {steps.map((s) => (
                 <div
                   key={s.key}
                   className={`w-8 h-1 rounded transition ${step === s.key || (steps.indexOf(s) < steps.findIndex(x => x.key === step) && step !== "complete") ? "bg-cyan-electric" : "bg-white/10"}`}
